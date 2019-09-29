@@ -19,6 +19,7 @@ from collections import Counter
 from itertools import chain
 from docopt import docopt
 import pickle
+import numpy as np
 
 from utils import read_corpus, input_transpose
 
@@ -62,9 +63,9 @@ class VocabEntry(object):
 
     def words2indices(self, sents):
         if type(sents[0]) == list:
-            return [[self[w] for w in s] for s in sents]
+            return np.asarray([np.asarray([self[w] for w in s]) for s in sents])
         else:
-            return [self[w] for w in sents]
+            return np.asarray([self[w] for w in sents])
 
     @staticmethod
     def from_corpus(corpus, size, freq_cutoff=2):
