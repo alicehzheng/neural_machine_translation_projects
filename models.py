@@ -1,11 +1,12 @@
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_packed_sequence, pack_sequence, pack_padded_sequence
 
 from collections import namedtuple
 
-from typing import List, Tuple, Dict, Set, Union
+from typing import List, Tuple, Dict, Set
 
 Hypothesis = namedtuple('Hypothesis', ['value', 'score'])
 
@@ -62,7 +63,7 @@ class Encoder(nn.Module):
         #print(value.shape)# N * L * out_dim
         #print(hidden.shape) # N * 512
         #print(cell.shape) # N * 512
-        return output, key, value, hidden, cell
+        return seq_lens, key, value, hidden, cell
 
 
 class Attention(nn.Module):
@@ -136,7 +137,7 @@ class NMT(nn.Module):
         self.device = device
         self.vocab_size_tgt = vocab_size_tgt
 
-    def forward(self, src_sents, tgt_sents, tgt_lens, teacher_forcing_ratio):
+    def forward(self, src_sents, tgt_sents, teacher_forcing_ratio):
         """
         take a mini-batch of source and target sentences, compute the log-likelihood of 
         target sentences.
@@ -155,16 +156,17 @@ class NMT(nn.Module):
         batch_size, max_len = tgt_sents.shape[0], tgt_sents.shape[1]
         prediction = torch.zeros(max_len, batch_size, self.vocab_size_tgt).to(self.device)
 
-        output_lstm, key, value, hidden2, cell2 = self.encoder(src_sents)
+        seq_lens, key, value, hidden2, cell2 = self.encoder(src_sents)
 
         word, hidden1, cell1 = tgt_sents[:, 0], hidden2, cell2
+        '''
         tgt_lens = tgt_lens.long()
         mask = torch.arange(tgt_lens.max()).unsqueeze(0) < tgt_lens.unsqueeze(1)
-        
         mask = mask.to(self.device)
+        '''
 
         for t in range(max_len):
-            context, attention = self.attention(hidden2, key, value, tgt_lens)
+            context, attention = self.attention(hidden2, key, value, seq_lens)
             # print("word")
             # print(word.shape)
             word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word.long(), context, hidden1, cell1, hidden2,
@@ -178,8 +180,10 @@ class NMT(nn.Module):
 
         return prediction
 
-    def beam_search(self, src_sent: List[str], beam_size: int = 5, max_decoding_time_step: int = 70) -> List[
-        Hypothesis]:
+
+
+    def beamSearch(self, src_sents, beam_size=10, max_length=100):
+
         """
         Given a single source sentence, perform beam search
 
@@ -194,8 +198,92 @@ class NMT(nn.Module):
                 score: float: the log-likelihood of the target sentence
         """
 
-        #return hypotheses
-        return None
+
+        print("beam search with beam size and length " + str(beam_size) + " " + str(max_length))
+
+        seq_lens, key, value, hidden2, cell2 = self.encoder(src_sents)
+
+        hidden1, cell1 = hidden2, cell2
+
+
+        sequences = []
+
+        # max_lengths = max(lens)
+        '''
+        word = torch.LongTensor([0]).to(device)
+        for idx in range(0, 100):           
+            context, attention  = self.attention(hidden2, key, value, lens)
+            word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word, context, hidden1, cell1, hidden2, cell2)
+            word = word_vec.max(1)[1]
+            sequences.append(word)
+            if word == 1:
+                break
+        return sequences
+
+
+        '''
+
+        context_map = {}
+        for idx in range(0, max_length):
+            # print("-------" + str(idx) + "--------")
+            if idx > 10  and sequences[0][0][-1] == 2: #end of sentence </s>
+                break
+            if idx == 0:
+                word = torch.LongTensor([0]).to(self.device)
+                if hidden2 in context_map.keys():
+                    context = context_map[hidden2]
+                else:
+                    context, attention = self.attention(hidden2, key, value, seq_lens)
+                    context_map[hidden2] = context
+                word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word, context, hidden1, cell1, hidden2, cell2)
+                word_vec = F.softmax(word_vec, dim=1)
+                for i in range(0, self.vocab_size_tgt):
+                    sequences.append([[0, i], word_vec[0, i], hidden1, cell1, hidden2, cell2])
+                # print(sequences)
+                ordered = sorted(sequences, key=lambda tup: tup[1], reverse=True)
+                sequences = ordered[:min(beam_size, len(ordered))]
+                # print(ordered)
+
+            else:
+                new_seqs = []
+                for seq, prob, hidden1, cell1, hidden2, cell2 in sequences:
+                    # print(seq)
+                    # print(prob)
+                    if seq[-1] == 1:
+                        new_seqs.append([seq, prob, hidden1, cell1, hidden2, cell2])
+                        # print("flag")
+                        # candidates_list.append([seq, prob, hidden1, cell1, hidden2, cell2])
+                    else:
+                        word = torch.LongTensor([seq[-1]]).to(self.device)
+                        # print("word:")
+                        # print(word)
+                        if hidden2 in context_map.keys():
+                            context = context_map[hidden2]
+                        else:
+                            context, attention = self.attention(hidden2, key, value, seq_lens)
+                            context_map[hidden2] = context
+                        word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word, context, hidden1, cell1, hidden2,
+                                                                                cell2)
+                        word_vec = F.softmax(word_vec, dim=1)
+                        for i in range(0, self.vocab_size_tgt):
+                            new_seqs.append([seq + [i], prob * word_vec[0, i], hidden1, cell1, hidden2, cell2])
+                            # print(word_vec)
+                            # print(word_vec.shape)
+                            # print(word_vec.sum())
+                # print(new_seqs)
+                ordered = sorted(new_seqs, key=lambda tup: tup[1], reverse=True)
+                sequences = ordered[:min(beam_size, len(ordered))]
+                # print(ordered)
+                # print(sequences)
+        # candidates_list += sequences
+        ordered = sorted(sequences, key=lambda tup: tup[1], reverse=True)
+
+        for seq, prob, hidden1, cell1, hidden2, cell2 in ordered:
+            # print(seq)
+            # print(prob)
+            if seq[-1] == 1 and len(seq) > 10:
+                return seq, prob
+        return ordered[0][0], ordered[0][1]
 
 
 
