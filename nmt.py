@@ -87,8 +87,7 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
     running_loss = 0
     running_len = 0
     running_sample = 0
-    for batch_idx, (source, target, target_lens, max_target_len) in enumerate(train_loader):
-
+    for batch_idx, (source, target, target_lens) in enumerate(train_loader):
         optimizer.zero_grad()
 
         source = source.to(device)
@@ -141,7 +140,7 @@ def evaluate(model, dev_loader, criterion, device):
         running_loss = 0
         running_len = 0
         running_sample = 0
-        for batch_idx, (source, target, target_lens, max_target_len) in enumerate(dev_loader):
+        for batch_idx, (source, target, target_lens) in enumerate(dev_loader):
             source = source.to(device)
             batch_size = target.shape[0]
             target = target.to(device)
@@ -176,6 +175,8 @@ def train(args: Dict[str, str]):
     vocab = pickle.load(open(args['--vocab'], 'rb'))
     srcEntry = vocab.src # VocabEntry for src
     tgtEntry = vocab.tgt # VocabEntry for tgt
+    vocab_size_src = len(srcEntry)
+    vocab_size_tgt = len(tgtEntry)
 
     batch_size = int(args['--batch-size'])
     clip_grad = float(args['--clip-grad'])
@@ -184,6 +185,7 @@ def train(args: Dict[str, str]):
     model_save_dir = args['--save-to']
     max_epoch = int(args['--max-epoch'])
     max_patience = int(args['--patience'])
+    lr_decay = float(args['--lr-decay'])
 
     train_data_src = read_corpus(args['--train-src'], source='src')
     train_data_tgt = read_corpus(args['--train-tgt'], source='tgt')
@@ -195,13 +197,13 @@ def train(args: Dict[str, str]):
     train_data = Trainset(srcEntry.words2indices(train_data_src), tgtEntry.words2indices(train_data_tgt))
     dev_data = Trainset(srcEntry.words2indices(dev_data_src), tgtEntry.words2indices(dev_data_tgt))
 
-    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=4, collate_fn=collate)
+    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=1, collate_fn=collate)
     dev_loader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=4, collate_fn=collate)
 
-    model = NMT(embed_size=int(args['--embed-size']),
-                hidden_size=int(args['--hidden-size']),
-                dropout_rate=float(args['--dropout']),
-                vocab=vocab)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    model = NMT(
+        embed_size=int(args['--embed-size']), hidden_size=int(args['--hidden-size']), vocab_size_src=vocab_size_src, vocab_size_tgt=vocab_size_tgt, out_size=int(args['--hidden-size']), device=device, dropout_rate=float(args['--dropout']))
 
     num_trial = 0
     patience = 0
@@ -209,7 +211,7 @@ def train(args: Dict[str, str]):
     hist_valid_scores = []
     begin_time = time.time()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
     criterion = nn.CrossEntropyLoss(reduction='sum')
 
@@ -252,12 +254,12 @@ def train(args: Dict[str, str]):
 
         print('validation: avg. loss %.2f, dev. ppl %f' % (dev_loss, dev_ppl), file=sys.stderr)
 
-        is_better = len(hist_valid_scores) == 0 or dev_ppl > max(hist_valid_scores)
+        is_better = len(hist_valid_scores) == 0 or dev_ppl < min(hist_valid_scores)
         hist_valid_scores.append(dev_ppl)
 
         if is_better:
             patience = 0
-            model_save_path = model_save_dir + '\model_' + str(epoch) + '.pt'
+            model_save_path = model_save_dir + '/model_' + str(epoch) + '.pt'
             print('save currently the best model to [%s]' % model_save_path, file=sys.stderr)
             torch.save(model, model_save_path)
             # You may also save the optimizer's state
@@ -336,6 +338,7 @@ def main():
     np.random.seed(seed * 13 // 7)
 
     if args['train']:
+        print("train mode")
         train(args)
     elif args['decode']:
         decode(args)
