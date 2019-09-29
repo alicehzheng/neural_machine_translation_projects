@@ -1,36 +1,11 @@
-import os
-import sys
-import csv
-import torch
-import torchvision
-import torch.nn as nn
-import torch.nn.functional as F
-from torch.utils.data import Dataset, DataLoader
-import numpy as np
-from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
-import random
-import matplotlib.pyplot as plt
-import matplotlib.lines as lines
-from tqdm import tqdm
+
 import torch
 import torch.nn as nn
 from torch.nn.utils.rnn import pad_packed_sequence, pack_sequence, pack_padded_sequence
-# from dropout import WeightDrop, LockedDrop
-import numpy as np
 
-import math
-import pickle
-import time
 from collections import namedtuple
 
-import numpy as np
 from typing import List, Tuple, Dict, Set, Union
-#from docopt import docopt
-from tqdm import tqdm
-from nltk.translate.bleu_score import corpus_bleu, sentence_bleu, SmoothingFunction
-
-from utils import read_corpus, batch_iter
-from vocab import Vocab, VocabEntry
 
 Hypothesis = namedtuple('Hypothesis', ['value', 'score'])
 
@@ -39,10 +14,10 @@ class Encoder(nn.Module):
     def __init__(self, vocab_size, embed_size, hidden_size, out_size, dropout_rate=0.2):
         super(Encoder, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
-        self.lstm1 = nn.LSTM(embed_size, hidden_size, bidirectional=True)
-        self.lstm2 = nn.LSTM(hidden_size, hidden_size, bidirectional=True)
-        self.lstm3 = nn.LSTM(hidden_size, hidden_size, bidirectional=True)
-        self.lstm4 = nn.LSTM(hidden_size, out_size, bidirectional=True)
+        self.lstm1 = nn.LSTM(embed_size, hidden_size, bidirectional=True, batch_first=True)
+        self.lstm2 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
+        self.lstm3 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
+        self.lstm4 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
 
         self.embed_drop = nn.Dropout(dropout_rate)
 
@@ -50,37 +25,50 @@ class Encoder(nn.Module):
         self.dropout2 = nn.Dropout(dropout_rate)
         self.dropout3 = nn.Dropout(dropout_rate)
 
-        self.fc1 = nn.Linear(out_size, out_size)
-        self.fc2 = nn.Linear(out_size, out_size)
+        self.fc1 = nn.Linear(hidden_size * 2, out_size)
+        self.fc2 = nn.Linear(hidden_size * 2, out_size)
         self.act = nn.SELU(True)
 
     def forward(self, x):
-        seq_len, batch_size = x.shape[0:2]
+        x, seq_lens = pad_packed_sequence(x, batch_first=True)
+
         embed = self.embedding(x.long())
         embed = self.embed_drop(embed)
-
-        output_lstm, (hidden1, cell1) = self.lstm1(embed)  # L x N x H
+        embed = pack_padded_sequence(embed, seq_lens, batch_first = True)
+        output_lstm, (hidden1, cell1) = self.lstm1(embed)  # N x L x H
+        output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
         output_lstm = self.dropout1(output_lstm)
-        output_lstm, (hidden2, cell2) = self.lstm2(output_lstm)  # L x N x H
+        output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
+        output_lstm, (hidden2, cell2) = self.lstm2(output_lstm)  # N x L x H
+        output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
         output_lstm = self.dropout2(output_lstm)
-        output_lstm, (hidden3, cell3) = self.lstm3(output_lstm)  # L x N x H
+        output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
+        output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
+        output_lstm, (hidden3, cell3) = self.lstm3(output_lstm)  # N x L x H
         output_lstm = self.dropout3(output_lstm)
-        output_lstm, (hidden4, cell4) = self.lstm4(output_lstm)  # L x N x H
+        output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
+        output_lstm, (hidden4, cell4) = self.lstm4(output_lstm)  # N x L x H
+        output, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
+        #print(seq_lens)
+        #print(output.shape) # N * L * 512
+        #print(hidden4.shape) # 2 * N * 256
+        #print(cell4.shape) # 2 * N * 256
+        key = self.act(self.fc1(output))
+        value = self.act(self.fc2(output))
 
-        key = self.act(self.fc1(output_lstm)).transpose(0, 1)
-        value = self.act(self.fc2(output_lstm)).transpose(0, 1)
-        hidden = torch.cat([hidden4[0, :, :], hidden4[1, :, :]], dim=1)
+        hidden = torch.cat([hidden4[0, :, :], hidden4[1, :, :]], dim=1) # concatenate hidden states of both directions
         cell = torch.cat([cell4[0, :, :], cell4[1, :, :]], dim=1)
-        print(key.shape)
-        print(value.shape)
-        print(hidden.shape)
-        return output_lstm, key, value, hidden, cell
+        #print(key.shape) # N * L * out_dim
+        #print(value.shape)# N * L * out_dim
+        #print(hidden.shape) # N * 512
+        #print(cell.shape) # N * 512
+        return output, key, value, hidden, cell
 
 
 class Attention(nn.Module):
-    def __init__(self):
+    def __init__(self, hidden_dim, out_dim):
         super(Attention, self).__init__()
-        self.query_layer = nn.Linear(512, 512)
+        self.query_layer = nn.Linear(hidden_dim, out_dim)
         self.E_softmax = nn.Softmax(dim=2)
 
     def forward(self, hidden2, key, value, seq_lens):
@@ -117,20 +105,21 @@ class Attention(nn.Module):
 
 
 class Decoder(nn.Module):
-    def __init__(self, out_dim, lstm_dim):
+    def __init__(self, vocab_size, embed_size, hidden_size):
         super(Decoder, self).__init__()
-        self.embed = nn.Embedding(out_dim, lstm_dim)
-        self.lstm1 = nn.LSTMCell(lstm_dim * 2, lstm_dim)
-        self.lstm2 = nn.LSTMCell(lstm_dim, lstm_dim)
+        self.embed = nn.Embedding(vocab_size, embed_size)
+        self.lstm1 = nn.LSTMCell(hidden_size, hidden_size)
+        self.lstm2 = nn.LSTMCell(hidden_size, hidden_size)
         self.drop = nn.Dropout(0.05)
-        self.fc = nn.Linear(lstm_dim, out_dim)
-        self.fc.weight = self.embed.weight
+        self.fc = nn.Linear(hidden_size, vocab_size)
+        #self.fc.weight = self.embed.weight
 
     def forward(self, x, context, hidden1, cell1, hidden2, cell2):
         x = self.embed(x)
-        ##print(context.shape)
+        #print(x.shape) # N * 256
+        #print(context.shape) # N * 256
         x = torch.cat([x, context], dim=1)
-
+        #print(x.shape) # N * 512
         hidden1, cell1 = self.lstm1(x, (hidden1, cell1))
         hidden2, cell2 = self.lstm2(hidden1, (hidden2, cell2))
         x = self.drop(hidden2)
@@ -138,71 +127,56 @@ class Decoder(nn.Module):
         return x, hidden1, cell1, hidden2, cell2
 
 
-class NMT(object):
-    def __init__(self, embed_size, hidden_size, vocab, dropout_rate=0.2):
+class NMT(nn.Module):
+    def __init__(self, embed_size, hidden_size, vocab_size_src, vocab_size_tgt, out_size, device, dropout_rate=0.2):
         super(NMT, self).__init__()
+        self.encoder = Encoder(vocab_size_src, embed_size, hidden_size, out_size, dropout_rate)
+        self.decoder = Decoder(vocab_size_tgt, embed_size, hidden_size * 2)
+        self.attention = Attention(hidden_size * 2, out_size)
+        self.device = device
+        self.vocab_size_tgt = vocab_size_tgt
 
-        self.encoder = Encoder()
-        self.embed_size = embed_size
-        self.hidden_size = hidden_size
-        self.dropout_rate = dropout_rate
-        self.vocab = vocab
-
-
-
-        # initialize neural network layers...
-
-    def forward(self, src_sents: List[List[str]], tgt_sents: List[List[str]]) -> Tensor:
+    def forward(self, src_sents, tgt_sents, tgt_lens, teacher_forcing_ratio):
         """
         take a mini-batch of source and target sentences, compute the log-likelihood of 
         target sentences.
 
         Args:
-            src_sents: list of source sentence tokens
-            tgt_sents: list of target sentence tokens, wrapped by `<s>` and `</s>`
+            src_sents: tensor of source sentence tokens
+            tgt_sents: tensor of target sentence tokens, wrapped by `<s>` and `</s>`
+            teacher_forcing_ratio: teacher forcing ratio
 
         Returns:
             scores: a variable/tensor of shape (batch_size, ) representing the 
                 log-likelihood of generating the gold-standard target sentence for 
                 each example in the input batch
         """
-        src_encodings, decoder_init_state = self.encode(src_sents, tgt_sents)
-        scores = self.decode(src_encodings, decoder_init_state, tgt_sents)
 
-        return scores
+        batch_size, max_len = tgt_sents.shape[0], tgt_sents.shape[1]
+        prediction = torch.zeros(max_len, batch_size, self.vocab_size_tgt).to(self.device)
 
-    def encode(self, src_sents: List[List[str]]) -> Tuple[Tensor, Any]:
-        """
-        Use a GRU/LSTM to encode source sentences into hidden states
+        output_lstm, key, value, hidden2, cell2 = self.encoder(src_sents)
 
-        Args:
-            src_sents: list of source sentence tokens
+        word, hidden1, cell1 = tgt_sents[:, 0], hidden2, cell2
+        tgt_lens = tgt_lens.long()
+        mask = torch.arange(tgt_lens.max()).unsqueeze(0) < tgt_lens.unsqueeze(1)
+        
+        mask = mask.to(self.device)
 
-        Returns:
-            src_encodings: hidden states of tokens in source sentences, this could be a variable 
-                with shape (batch_size, source_sentence_length, encoding_dim), or in orther formats
-            decoder_init_state: decoder GRU/LSTM's initial state, computed from source encodings
-        """
+        for t in range(max_len):
+            context, attention = self.attention(hidden2, key, value, tgt_lens)
+            # print("word")
+            # print(word.shape)
+            word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word.long(), context, hidden1, cell1, hidden2,
+                                                                    cell2)
+            prediction[t] = word_vec
+            teacher_force = torch.rand(1) < teacher_forcing_ratio
+            if teacher_force:
+                word = tgt_sents[:, t]
+            else:
+                word = word_vec.max(1)[1]
 
-        return src_encodings, decoder_init_state
-
-    def decode(self, src_encodings: Tensor, decoder_init_state: Any, tgt_sents: List[List[str]]) -> Tensor:
-        """
-        Given source encodings, compute the log-likelihood of predicting the gold-standard target
-        sentence tokens
-
-        Args:
-            src_encodings: hidden states of tokens in source sentences
-            decoder_init_state: decoder GRU/LSTM's initial state
-            tgt_sents: list of gold-standard target sentences, wrapped by `<s>` and `</s>`
-
-        Returns:
-            scores: could be a variable of shape (batch_size, ) representing the 
-                log-likelihood of generating the gold-standard target sentence for 
-                each example in the input batch
-        """
-
-        return scores
+        return prediction
 
     def beam_search(self, src_sent: List[str], beam_size: int = 5, max_decoding_time_step: int = 70) -> List[
         Hypothesis]:
@@ -220,35 +194,8 @@ class NMT(object):
                 score: float: the log-likelihood of the target sentence
         """
 
-        return hypotheses
+        #return hypotheses
+        return None
 
-    def evaluate_ppl(self, dev_data: List[Any], batch_size: int = 32):
-        """
-        Evaluate perplexity on dev sentences
 
-        Args:
-            dev_data: a list of dev sentences
-            batch_size: batch size
-
-        Returns:
-            ppl: the perplexity on dev sentences
-        """
-
-        cum_loss = 0.
-        cum_tgt_words = 0.
-
-        # you may want to wrap the following code using a context manager provided
-        # by the NN library to signal the backend to not to keep gradient information
-        # e.g., `torch.no_grad()`
-
-        for src_sents, tgt_sents in batch_iter(dev_data, batch_size):
-            loss = -model(src_sents, tgt_sents).sum()
-
-            cum_loss += loss
-            tgt_word_num_to_predict = sum(len(s[1:]) for s in tgt_sents)  # omitting the leading `<s>`
-            cum_tgt_words += tgt_word_num_to_predict
-
-        ppl = np.exp(cum_loss / cum_tgt_words)
-
-        return ppl
 
