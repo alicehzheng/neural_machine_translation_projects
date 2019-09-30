@@ -10,6 +10,15 @@ from typing import List, Tuple, Dict, Set
 
 Hypothesis = namedtuple('Hypothesis', ['value', 'score'])
 
+def init_uniform(m):
+    if type(m) == nn.Linear or type(m) == nn.Embedding:
+        nn.init.uniform_(m.weight.data, -0.1, 0.1)
+    elif type(m) == nn.LSTM or type(m) == nn.LSTMCell:
+        for name, param in m.named_parameters():
+            if 'bias' in name:
+                nn.init.constant_(param, 0.0)
+            elif 'weight' in name:
+                nn.init.uniform_(param, -0.1, 0.1)
 
 class Encoder(nn.Module):
     def __init__(self, vocab_size, embed_size, hidden_size, out_size, dropout_rate=0.2):
@@ -168,6 +177,11 @@ class NMT(nn.Module):
         self.encoder = Encoder(vocab_size_src, embed_size, hidden_size, out_size, dropout_rate)
         self.decoder = Decoder(vocab_size_tgt, embed_size, hidden_size * 2)
         self.attention = Attention(hidden_size * 2, out_size)
+        # Uniform Initialization
+        self.encoder.apply(init_uniform)
+        self.decoder.apply(init_uniform)
+        self.attention.apply(init_uniform)
+
         self.device = device
         self.vocab_size_tgt = vocab_size_tgt
 
@@ -188,8 +202,6 @@ class NMT(nn.Module):
         """
 
         batch_size, max_len = tgt_sents.shape[0:2]
-        print(batch_size)
-        print(max_len)
         prediction = torch.zeros(max_len, batch_size, self.vocab_size_tgt).to(self.device)
 
         seq_lens, key, value, hidden, cell = self.encoder(src_sents)
