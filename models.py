@@ -125,22 +125,20 @@ class Attention(nn.Module):
         #print(attention_score_hidden.shape) # attention_score_hidden: N * L * out_dim
         attention_score_weight = self.attention_mlp(attention_score_hidden).squeeze(2)
         #print(attention_score_weight.shape) # attention_score_weight: N * L
-        attention_score = self.E_softmax(attention_score_weight)
-        #print(attention_score.shape) # attention_score: N * L
-        
-        #print(attention_score)
+
+        #print(attention_score_weight)
         #print(seq_lens)
         for i in range(0, len(seq_lens)):
-            attention_score[i, seq_lens[i]:] = float("-infinity")
-        #print(attention_score)
-        # print(E)
-        attention_score = self.E_softmax(attention_score)
+            attention_score_weight[i, seq_lens[i]:] = float("-infinity")
+        #print(attention_score_weight)
+        attention_score = self.E_softmax(attention_score_weight)
         #print(attention_score)
 
         context = torch.bmm(attention_score.unsqueeze(1), value).squeeze(1) # bmm: (N * 1 * L), (N * L * dim) -> (N * 1 * dim)
         #print(context.shape) # N * dim
 
-        return context, attention_score.cpu().data.numpy()
+        #return context, attention_score.cpu().data.numpy()
+        return context, attention_score
 
 class Decoder(nn.Module):
     def __init__(self, vocab_size, embed_size, hidden_size):
