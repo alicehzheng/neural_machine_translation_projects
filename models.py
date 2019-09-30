@@ -113,8 +113,6 @@ class Attention(nn.Module):
 
     def forward(self, hidden, key, value, seq_lens):
 
-        batch, slen, dim = key.shape[:]
-
         query = self.query_mlp(hidden)
 
         #print(key.shape) # key: N * L * out_dim
@@ -159,7 +157,7 @@ class Decoder(nn.Module):
         hidden1, cell1 = self.lstm1(x, (hidden1, cell1))
         #hidden2, cell2 = self.lstm2(hidden1, (hidden2, cell2))
         #x = self.drop(hidden2)
-        x = self.fc(x)
+        x = self.fc(hidden1)
         #return x, hidden1, cell1, hidden2, cell2
         return x, hidden1, cell1
 
@@ -189,17 +187,15 @@ class NMT(nn.Module):
                 each example in the input batch
         """
 
-        batch_size, max_len = tgt_sents.shape[0], tgt_sents.shape[1]
+        batch_size, max_len = tgt_sents.shape[0:2]
+        print(batch_size)
+        print(max_len)
         prediction = torch.zeros(max_len, batch_size, self.vocab_size_tgt).to(self.device)
 
         seq_lens, key, value, hidden, cell = self.encoder(src_sents)
 
         word = tgt_sents[:, 0]
-        '''
-        tgt_lens = tgt_lens.long()
-        mask = torch.arange(tgt_lens.max()).unsqueeze(0) < tgt_lens.unsqueeze(1)
-        mask = mask.to(self.device)
-        '''
+        print(word.shape)
 
         for t in range(max_len):
             context, attention = self.attention(hidden, key, value, seq_lens)
