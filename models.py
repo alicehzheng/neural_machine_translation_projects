@@ -39,6 +39,16 @@ class Encoder(nn.Module):
         self.fc2 = nn.Linear(hidden_size * 2, out_size)
         self.act = nn.SELU(True)
 
+    def forward_for_one(self, x):
+        embed = self.embedding(x.long())
+        embed = self.embed_drop(embed)
+        output, (hidden1, cell1) = self.lstm1(embed)
+        key = self.act(self.fc1(output))
+        value = self.act(self.fc2(output))
+        hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1)  # concatenate hidden states of both directions
+        cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
+        return None, key, value, hidden, cell
+
     def forward(self, x):
         x, seq_lens = pad_packed_sequence(x, batch_first=True)
 
@@ -135,8 +145,9 @@ class Attention(nn.Module):
 
         #print(attention_score_weight)
         #print(seq_lens)
-        for i in range(0, len(seq_lens)):
-            attention_score_weight[i, seq_lens[i]:] = float("-infinity")
+        if seq_lens is not None:
+            for i in range(0, len(seq_lens)):
+                attention_score_weight[i, seq_lens[i]:] = float("-infinity")
         #print(attention_score_weight)
         attention_score = self.E_softmax(attention_score_weight)
         #print(attention_score)
@@ -222,7 +233,7 @@ class NMT(nn.Module):
 
 
 
-    def beamSearch(self, src_sents, beam_size=10, max_length=100):
+    def beam_search(self, src_sents, beam_size=10, max_length=100):
 
         """
         Given a single source sentence, perform beam search
@@ -241,7 +252,7 @@ class NMT(nn.Module):
 
         print("beam search with beam size and length " + str(beam_size) + " " + str(max_length))
 
-        seq_lens, key, value, hidden, cell = self.encoder(src_sents)
+        _, key, value, hidden, cell = self.encoder.forward_for_one(src_sents.to(self.device))
 
         sequences = []
 
@@ -255,7 +266,7 @@ class NMT(nn.Module):
                 if hidden in context_map.keys():
                     context = context_map[hidden]
                 else:
-                    context, attention = self.attention(hidden, key, value, seq_lens)
+                    context, attention = self.attention(hidden, key, value, None)
                     context_map[hidden] = context
                 word_vec, hidden, cell = self.decoder(word, context, hidden, cell)
                 word_vec = F.softmax(word_vec, dim=1) # 1 * vocab_size
@@ -281,7 +292,7 @@ class NMT(nn.Module):
                         if hidden in context_map.keys():
                             context = context_map[hidden]
                         else:
-                            context, attention = self.attention(hidden, key, value, seq_lens)
+                            context, attention = self.attention(hidden, key, value, None)
                             context_map[hidden] = context
                         word_vec, hidden, cell = self.decoder(word, context, hidden, cell)
                         word_vec = F.softmax(word_vec, dim=1)
