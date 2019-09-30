@@ -16,15 +16,15 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
         self.embedding = nn.Embedding(vocab_size, embed_size)
         self.lstm1 = nn.LSTM(embed_size, hidden_size, bidirectional=True, batch_first=True)
-        self.lstm2 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
-        self.lstm3 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
-        self.lstm4 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
+        #self.lstm2 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
+        #self.lstm3 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
+        #self.lstm4 = nn.LSTM(hidden_size * 2, hidden_size, bidirectional=True, batch_first=True)
 
         self.embed_drop = nn.Dropout(dropout_rate)
 
-        self.dropout1 = nn.Dropout(dropout_rate)
-        self.dropout2 = nn.Dropout(dropout_rate)
-        self.dropout3 = nn.Dropout(dropout_rate)
+        #self.dropout1 = nn.Dropout(dropout_rate)
+        #self.dropout2 = nn.Dropout(dropout_rate)
+        #self.dropout3 = nn.Dropout(dropout_rate)
 
         self.fc1 = nn.Linear(hidden_size * 2, out_size)
         self.fc2 = nn.Linear(hidden_size * 2, out_size)
@@ -37,18 +37,18 @@ class Encoder(nn.Module):
         embed = self.embed_drop(embed)
         embed = pack_padded_sequence(embed, seq_lens, batch_first = True)
         output_lstm, (hidden1, cell1) = self.lstm1(embed)  # N x L x H
-        output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
-        output_lstm = self.dropout1(output_lstm)
-        output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
-        output_lstm, (hidden2, cell2) = self.lstm2(output_lstm)  # N x L x H
-        output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
-        output_lstm = self.dropout2(output_lstm)
-        output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
-        output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
-        output_lstm, (hidden3, cell3) = self.lstm3(output_lstm)  # N x L x H
-        output_lstm = self.dropout3(output_lstm)
-        output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
-        output_lstm, (hidden4, cell4) = self.lstm4(output_lstm)  # N x L x H
+        #output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
+        #output_lstm = self.dropout1(output_lstm)
+        #output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
+        #output_lstm, (hidden2, cell2) = self.lstm2(output_lstm)  # N x L x H
+        #output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
+        #output_lstm = self.dropout2(output_lstm)
+        #output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
+        #output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
+        #output_lstm, (hidden3, cell3) = self.lstm3(output_lstm)  # N x L x H
+        #output_lstm = self.dropout3(output_lstm)
+        #output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
+        #output_lstm, (hidden4, cell4) = self.lstm4(output_lstm)  # N x L x H
         output, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
         #print(seq_lens)
         #print(output.shape) # N * L * 512
@@ -57,8 +57,8 @@ class Encoder(nn.Module):
         key = self.act(self.fc1(output))
         value = self.act(self.fc2(output))
 
-        hidden = torch.cat([hidden4[0, :, :], hidden4[1, :, :]], dim=1) # concatenate hidden states of both directions
-        cell = torch.cat([cell4[0, :, :], cell4[1, :, :]], dim=1)
+        hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1) # concatenate hidden states of both directions
+        cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
         #print(key.shape) # N * L * out_dim
         #print(value.shape)# N * L * out_dim
         #print(hidden.shape) # N * 512
@@ -66,9 +66,9 @@ class Encoder(nn.Module):
         return seq_lens, key, value, hidden, cell
 
 
-class Attention(nn.Module):
+class Attention_general(nn.Module):
     def __init__(self, hidden_dim, out_dim):
-        super(Attention, self).__init__()
+        super(Attention_general, self).__init__()
         self.query_layer = nn.Linear(hidden_dim, out_dim)
         self.E_softmax = nn.Softmax(dim=2)
 
@@ -104,28 +104,66 @@ class Attention(nn.Module):
 
         return context, E.cpu().squeeze(2).data.numpy()
 
+class Attention(nn.Module):
+    def __init__(self, hidden_dim, out_dim):
+        super(Attention, self).__init__()
+        self.query_mlp = nn.Linear(hidden_dim, out_dim)
+        self.attention_mlp = nn.Linear(out_dim, 1)
+        self.E_softmax = nn.Softmax(dim=-1)
+
+    def forward(self, hidden, key, value, seq_lens):
+
+        batch, slen, dim = key.shape[:]
+
+        query = self.query_mlp(hidden)
+
+        #print(key.shape) # key: N * L * out_dim
+        #print(value.shape) # value: N * L * out_dim
+        #print(query.shape) # query: N * out_dim
+
+        attention_score_hidden = torch.tanh(key + query.unsqueeze(1)) # query: N * 1 * out_dim
+        #print(attention_score_hidden.shape) # attention_score_hidden: N * L * out_dim
+        attention_score_weight = self.attention_mlp(attention_score_hidden).squeeze(2)
+        #print(attention_score_weight.shape) # attention_score_weight: N * L
+        attention_score = self.E_softmax(attention_score_weight)
+        #print(attention_score.shape) # attention_score: N * L
+        
+        #print(attention_score)
+        #print(seq_lens)
+        for i in range(0, len(seq_lens)):
+            attention_score[i, seq_lens[i]:] = float("-infinity")
+        #print(attention_score)
+        # print(E)
+        attention_score = self.E_softmax(attention_score)
+        #print(attention_score)
+
+        context = torch.bmm(attention_score.unsqueeze(1), value).squeeze(1) # bmm: (N * 1 * L), (N * L * dim) -> (N * 1 * dim)
+        #print(context.shape) # N * dim
+
+        return context, attention_score.cpu().data.numpy()
 
 class Decoder(nn.Module):
     def __init__(self, vocab_size, embed_size, hidden_size):
         super(Decoder, self).__init__()
         self.embed = nn.Embedding(vocab_size, embed_size)
         self.lstm1 = nn.LSTMCell(hidden_size, hidden_size)
-        self.lstm2 = nn.LSTMCell(hidden_size, hidden_size)
-        self.drop = nn.Dropout(0.05)
+        #self.lstm2 = nn.LSTMCell(hidden_size, hidden_size)
+        #self.drop = nn.Dropout(0.05)
         self.fc = nn.Linear(hidden_size, vocab_size)
         #self.fc.weight = self.embed.weight
 
-    def forward(self, x, context, hidden1, cell1, hidden2, cell2):
+    def forward(self, x, context, hidden1, cell1):
         x = self.embed(x)
         #print(x.shape) # N * 256
         #print(context.shape) # N * 256
         x = torch.cat([x, context], dim=1)
         #print(x.shape) # N * 512
         hidden1, cell1 = self.lstm1(x, (hidden1, cell1))
-        hidden2, cell2 = self.lstm2(hidden1, (hidden2, cell2))
-        x = self.drop(hidden2)
+        #hidden2, cell2 = self.lstm2(hidden1, (hidden2, cell2))
+        #x = self.drop(hidden2)
         x = self.fc(x)
-        return x, hidden1, cell1, hidden2, cell2
+        #return x, hidden1, cell1, hidden2, cell2
+        return x, hidden1, cell1
 
 
 class NMT(nn.Module):
@@ -156,9 +194,9 @@ class NMT(nn.Module):
         batch_size, max_len = tgt_sents.shape[0], tgt_sents.shape[1]
         prediction = torch.zeros(max_len, batch_size, self.vocab_size_tgt).to(self.device)
 
-        seq_lens, key, value, hidden2, cell2 = self.encoder(src_sents)
+        seq_lens, key, value, hidden, cell = self.encoder(src_sents)
 
-        word, hidden1, cell1 = tgt_sents[:, 0], hidden2, cell2
+        word = tgt_sents[:, 0]
         '''
         tgt_lens = tgt_lens.long()
         mask = torch.arange(tgt_lens.max()).unsqueeze(0) < tgt_lens.unsqueeze(1)
@@ -166,11 +204,10 @@ class NMT(nn.Module):
         '''
 
         for t in range(max_len):
-            context, attention = self.attention(hidden2, key, value, seq_lens)
+            context, attention = self.attention(hidden, key, value, seq_lens)
             # print("word")
             # print(word.shape)
-            word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word.long(), context, hidden1, cell1, hidden2,
-                                                                    cell2)
+            word_vec, hidden, cell = self.decoder(word.long(), context, hidden, cell)
             prediction[t] = word_vec
             teacher_force = torch.rand(1) < teacher_forcing_ratio
             if teacher_force:
