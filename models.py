@@ -211,7 +211,7 @@ class NMT(nn.Module):
             # print("word")
             #print(word.shape)
             word_vec, hidden, cell = self.decoder(word.long(), context, hidden, cell)
-            #print(word_vec.shape)
+            #print(word_vec.shape) # N * vocab_size
             prediction[t] = word_vec
             teacher_force = torch.rand(1) < teacher_forcing_ratio
             if teacher_force:
@@ -241,27 +241,11 @@ class NMT(nn.Module):
 
         print("beam search with beam size and length " + str(beam_size) + " " + str(max_length))
 
-        seq_lens, key, value, hidden2, cell2 = self.encoder(src_sents)
+        seq_lens, key, value, hidden, cell = self.encoder(src_sents)
 
-        hidden1, cell1 = hidden2, cell2
 
 
         sequences = []
-
-        # max_lengths = max(lens)
-        '''
-        word = torch.LongTensor([0]).to(device)
-        for idx in range(0, 100):           
-            context, attention  = self.attention(hidden2, key, value, lens)
-            word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word, context, hidden1, cell1, hidden2, cell2)
-            word = word_vec.max(1)[1]
-            sequences.append(word)
-            if word == 1:
-                break
-        return sequences
-
-
-        '''
 
         context_map = {}
         for idx in range(0, max_length):
@@ -269,44 +253,42 @@ class NMT(nn.Module):
             if idx > 10  and sequences[0][0][-1] == 2: #end of sentence </s>
                 break
             if idx == 0:
-                word = torch.LongTensor([0]).to(self.device)
-                if hidden2 in context_map.keys():
-                    context = context_map[hidden2]
+                word = torch.LongTensor([1]).to(self.device) # start of sentence <s>
+                if hidden in context_map.keys():
+                    context = context_map[hidden]
                 else:
-                    context, attention = self.attention(hidden2, key, value, seq_lens)
-                    context_map[hidden2] = context
-                word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word, context, hidden1, cell1, hidden2, cell2)
-                word_vec = F.softmax(word_vec, dim=1)
-                for i in range(0, self.vocab_size_tgt):
-                    sequences.append([[0, i], word_vec[0, i], hidden1, cell1, hidden2, cell2])
+                    context, attention = self.attention(hidden, key, value, seq_lens)
+                    context_map[hidden] = context
+                word_vec, hidden, cell = self.decoder(word, context, hidden, cell)
+                word_vec = F.softmax(word_vec, dim=1) # 1 * vocab_size
+                for i in range(1, self.vocab_size_tgt):
+                    sequences.append([[1, i], word_vec[0, i], hidden, cell])
                 # print(sequences)
                 ordered = sorted(sequences, key=lambda tup: tup[1], reverse=True)
                 sequences = ordered[:min(beam_size, len(ordered))]
                 # print(ordered)
-
             else:
                 new_seqs = []
-                for seq, prob, hidden1, cell1, hidden2, cell2 in sequences:
+                for seq, prob, hidden, cell in sequences:
                     # print(seq)
                     # print(prob)
-                    if seq[-1] == 1:
-                        new_seqs.append([seq, prob, hidden1, cell1, hidden2, cell2])
+                    if seq[-1] == 2: #end of sentence </s>
+                        new_seqs.append([seq, prob, hidden, cell])
                         # print("flag")
                         # candidates_list.append([seq, prob, hidden1, cell1, hidden2, cell2])
                     else:
                         word = torch.LongTensor([seq[-1]]).to(self.device)
                         # print("word:")
                         # print(word)
-                        if hidden2 in context_map.keys():
-                            context = context_map[hidden2]
+                        if hidden in context_map.keys():
+                            context = context_map[hidden]
                         else:
-                            context, attention = self.attention(hidden2, key, value, seq_lens)
-                            context_map[hidden2] = context
-                        word_vec, hidden1, cell1, hidden2, cell2 = self.decoder(word, context, hidden1, cell1, hidden2,
-                                                                                cell2)
+                            context, attention = self.attention(hidden, key, value, seq_lens)
+                            context_map[hidden] = context
+                        word_vec, hidden, cell = self.decoder(word, context, hidden, cell)
                         word_vec = F.softmax(word_vec, dim=1)
-                        for i in range(0, self.vocab_size_tgt):
-                            new_seqs.append([seq + [i], prob * word_vec[0, i], hidden1, cell1, hidden2, cell2])
+                        for i in range(1, self.vocab_size_tgt):
+                            new_seqs.append([seq + [i], prob * word_vec[0, i], hidden, cell])
                             # print(word_vec)
                             # print(word_vec.shape)
                             # print(word_vec.sum())
@@ -318,12 +300,12 @@ class NMT(nn.Module):
         # candidates_list += sequences
         ordered = sorted(sequences, key=lambda tup: tup[1], reverse=True)
 
-        for seq, prob, hidden1, cell1, hidden2, cell2 in ordered:
+        for seq, prob, hidden, cell in ordered:
             # print(seq)
             # print(prob)
-            if seq[-1] == 1 and len(seq) > 10:
-                return seq, prob
-        return ordered[0][0], ordered[0][1]
+            if seq[-1] == 2 and len(seq) > 10:
+                return Hypothesis(seq, prob)
+        return Hypothesis(ordered[0][0], ordered[0][1])
 
 
 
