@@ -143,8 +143,6 @@ class Attention(nn.Module):
 
         context = torch.bmm(attention_score.unsqueeze(1), value).squeeze(1) # bmm: (N * 1 * L), (N * L * dim) -> (N * 1 * dim)
         #print(context.shape) # N * dim
-
-        #return context, attention_score.cpu().data.numpy()
         return context, attention_score
 
 class Decoder(nn.Module):
@@ -207,20 +205,19 @@ class NMT(nn.Module):
         seq_lens, key, value, hidden, cell = self.encoder(src_sents)
 
         word = tgt_sents[:, 0]
-        print(word.shape)
 
         for t in range(max_len):
             context, attention = self.attention(hidden, key, value, seq_lens)
             # print("word")
-            # print(word.shape)
+            #print(word.shape)
             word_vec, hidden, cell = self.decoder(word.long(), context, hidden, cell)
+            #print(word_vec.shape)
             prediction[t] = word_vec
             teacher_force = torch.rand(1) < teacher_forcing_ratio
             if teacher_force:
                 word = tgt_sents[:, t]
             else:
                 word = word_vec.max(1)[1]
-
         return prediction
 
 
