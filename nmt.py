@@ -80,7 +80,7 @@ def compute_corpus_level_bleu_score(references: List[List[str]], hypotheses: Lis
     return bleu_score
 
 
-def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, device):
+def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, clip_grad, device):
     model.train()
     model.to(device)
 
@@ -95,14 +95,13 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
         batch_size = target.shape[0]
         target = target.to(device)
 
-        prediction = model(source, target, teacher_forcing_ratio)
+        prediction = model(source, target, teacher_forcing_ratio) # prediction: L * N * vocab_size
 
-        # print(prediction.shape)
-        # sys.exit()
-        # print(outputs.shape)
-        # print(targets.shape)
-        # print(total_len)
-        prediction = prediction.transpose(0, 1)
+        #print(prediction.shape)
+
+        prediction = prediction.transpose(0, 1) # N * L * vocab_size
+        #print(prediction.shape)
+        #print(target.shape) # target: N * L
 
         output_list = []
         target_list = []
@@ -123,7 +122,7 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
 
         loss /= total_len
         loss.backward()
-
+        nn.utils.clip_grad_value_(model.parameters(), clip_grad)
         optimizer.step()
 
         # release memory
@@ -193,12 +192,15 @@ def train(args: Dict[str, str]):
     dev_data_src = read_corpus(args['--dev-src'], source='src')
     dev_data_tgt = read_corpus(args['--dev-tgt'], source='tgt')
 
+
+
     # each sent is represented by indices in the corresponding VocabEntry
     train_data = Trainset(srcEntry.words2indices(train_data_src), tgtEntry.words2indices(train_data_tgt))
     dev_data = Trainset(srcEntry.words2indices(dev_data_src), tgtEntry.words2indices(dev_data_tgt))
 
-    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=1, collate_fn=collate)
+    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=4, collate_fn=collate)
     dev_loader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=4, collate_fn=collate)
+
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -226,7 +228,7 @@ def train(args: Dict[str, str]):
         epoch += 1
         print("Training for Epoch " + str(epoch) + "\n")
 
-        avg_loss, avg_ppl = train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, device)
+        avg_loss, avg_ppl = train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, clip_grad, device)
         print('epoch %d:  avg. loss %.2f, avg. ppl %.2f, time elapsed %.2f sec' % (epoch, avg_loss, avg_ppl, time.time() - begin_time),
               file=sys.stderr)
 
@@ -281,6 +283,8 @@ def train(args: Dict[str, str]):
                 # You may also need to load the state of the optimizer saved before
                 if saved_optimizer:
                     optimizer = saved_optimizer
+                    for param_group in optimizer.param_groups:
+                        param_group['lr'] *= lr_decay
 
                 # reset patience
                 patience = 0
@@ -288,15 +292,15 @@ def train(args: Dict[str, str]):
 
 
 
-def beam_search(model: NMT, test_data_src: List[List[str]], beam_size: int, max_decoding_time_step: int) -> List[List[Hypothesis]]:
-    was_training = model.training
-
+def beam_search(model, test_loader, beam_size, max_decoding_time_step, tgtEntry):
     hypotheses = []
-    for src_sent in tqdm(test_data_src, desc='Decoding', file=sys.stdout):
+    for batch_idx, (src_sent) in enumerate(test_loader):
         example_hyps = model.beam_search(src_sent, beam_size=beam_size, max_decoding_time_step=max_decoding_time_step)
-
-        hypotheses.append(example_hyps)
-
+        value = example_hyps.value
+        translated_sent = []
+        for wid in value:
+            translated_sent.append(tgtEntry.id2word(wid))
+        hypotheses.append(Hypothesis(translated_sent[1:-1], hypotheses.score))
     return hypotheses
 
 
@@ -306,16 +310,27 @@ def decode(args: Dict[str, str]):
     If the target gold-standard sentences are given, the function also computes
     corpus-level BLEU score.
     """
+
+    vocab = pickle.load(open(args['--vocab'], 'rb'))
+    srcEntry = vocab.src  # VocabEntry for src
+    tgtEntry = vocab.tgt  # VocabEntry for tgt
+
     test_data_src = read_corpus(args['TEST_SOURCE_FILE'], source='src')
+
+    test_data = Testset(srcEntry.words2indices(test_data_src))
+    test_loader = DataLoader(test_data, 1, shuffle=False)
+
     if args['TEST_TARGET_FILE']:
         test_data_tgt = read_corpus(args['TEST_TARGET_FILE'], source='tgt')
 
     print(f"load model from {args['MODEL_PATH']}", file=sys.stderr)
+
+
     model = NMT.load(args['MODEL_PATH'])
 
-    hypotheses = beam_search(model, test_data_src,
+    hypotheses = beam_search(model, test_loader,
                              beam_size=int(args['--beam-size']),
-                             max_decoding_time_step=int(args['--max-decoding-time-step']))
+                             max_decoding_time_step=int(args['--max-decoding-time-step']), tgtEntry=tgtEntry)
 
     if args['TEST_TARGET_FILE']:
         top_hypotheses = [hyps[0] for hyps in hypotheses]
