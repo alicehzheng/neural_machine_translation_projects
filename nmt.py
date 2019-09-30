@@ -193,12 +193,15 @@ def train(args: Dict[str, str]):
     dev_data_src = read_corpus(args['--dev-src'], source='src')
     dev_data_tgt = read_corpus(args['--dev-tgt'], source='tgt')
 
+
+
     # each sent is represented by indices in the corresponding VocabEntry
     train_data = Trainset(srcEntry.words2indices(train_data_src), tgtEntry.words2indices(train_data_tgt))
     dev_data = Trainset(srcEntry.words2indices(dev_data_src), tgtEntry.words2indices(dev_data_tgt))
 
-    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=1, collate_fn=collate)
+    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=4, collate_fn=collate)
     dev_loader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=4, collate_fn=collate)
+
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -288,15 +291,15 @@ def train(args: Dict[str, str]):
 
 
 
-def beam_search(model: NMT, test_data_src: List[List[str]], beam_size: int, max_decoding_time_step: int) -> List[List[Hypothesis]]:
-    was_training = model.training
-
+def beam_search(model, test_loader, beam_size, max_decoding_time_step, tgtEntry):
     hypotheses = []
-    for src_sent in tqdm(test_data_src, desc='Decoding', file=sys.stdout):
+    for batch_idx, (src_sent) in enumerate(test_loader):
         example_hyps = model.beam_search(src_sent, beam_size=beam_size, max_decoding_time_step=max_decoding_time_step)
-
-        hypotheses.append(example_hyps)
-
+        value = example_hyps.value
+        translated_sent = []
+        for wid in value:
+            translated_sent.append(tgtEntry.id2word(wid))
+        hypotheses.append(Hypothesis(translated_sent, hypotheses.score))
     return hypotheses
 
 
@@ -306,16 +309,27 @@ def decode(args: Dict[str, str]):
     If the target gold-standard sentences are given, the function also computes
     corpus-level BLEU score.
     """
+
+    vocab = pickle.load(open(args['--vocab'], 'rb'))
+    srcEntry = vocab.src  # VocabEntry for src
+    tgtEntry = vocab.tgt  # VocabEntry for tgt
+
     test_data_src = read_corpus(args['TEST_SOURCE_FILE'], source='src')
+
+    test_data = Testset(srcEntry.words2indices(test_data_src))
+    test_loader = DataLoader(test_data, 1, shuffle=False)
+
     if args['TEST_TARGET_FILE']:
         test_data_tgt = read_corpus(args['TEST_TARGET_FILE'], source='tgt')
 
     print(f"load model from {args['MODEL_PATH']}", file=sys.stderr)
+
+
     model = NMT.load(args['MODEL_PATH'])
 
-    hypotheses = beam_search(model, test_data_src,
+    hypotheses = beam_search(model, test_loader,
                              beam_size=int(args['--beam-size']),
-                             max_decoding_time_step=int(args['--max-decoding-time-step']))
+                             max_decoding_time_step=int(args['--max-decoding-time-step']), tgtEntry=tgtEntry)
 
     if args['TEST_TARGET_FILE']:
         top_hypotheses = [hyps[0] for hyps in hypotheses]
