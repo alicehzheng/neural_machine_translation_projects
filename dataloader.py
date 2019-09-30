@@ -28,6 +28,7 @@ def collate(seqs):
     lens = torch.zeros(batch_size, dtype=torch.int)
     max_target_len = 0
     for i in range(0, batch_size):
+        #print(seqs[i][1])
         lens[i] = seqs[i][1].shape[0] - 1  # omitting leading `<s>`
         max_target_len = max(max_target_len, lens[i])
 
@@ -39,6 +40,8 @@ def collate(seqs):
         target_lens[i] = lens[t_idx]
         target[i, 0:target_lens[i]] = torch.LongTensor(seqs[t_idx][1][1:])
         #print(target[i])
+    #print(target)
+    #print(target_lens)
     return [packed_data, target, target_lens]
 
 
