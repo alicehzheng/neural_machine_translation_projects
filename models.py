@@ -218,7 +218,7 @@ class NMT(nn.Module):
                 word = tgt_sents[:, t]
             else:
                 word = word_vec.max(1)[1]
-        return prediction
+        return prediction # L * N * vocab_size
 
 
 
@@ -242,8 +242,6 @@ class NMT(nn.Module):
         print("beam search with beam size and length " + str(beam_size) + " " + str(max_length))
 
         seq_lens, key, value, hidden, cell = self.encoder(src_sents)
-
-
 
         sequences = []
 

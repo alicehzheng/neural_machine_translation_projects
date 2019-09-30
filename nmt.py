@@ -80,7 +80,7 @@ def compute_corpus_level_bleu_score(references: List[List[str]], hypotheses: Lis
     return bleu_score
 
 
-def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, device):
+def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, clip_grad, device):
     model.train()
     model.to(device)
 
@@ -95,14 +95,13 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
         batch_size = target.shape[0]
         target = target.to(device)
 
-        prediction = model(source, target, teacher_forcing_ratio)
+        prediction = model(source, target, teacher_forcing_ratio) # prediction: L * N * vocab_size
 
-        # print(prediction.shape)
-        # sys.exit()
-        # print(outputs.shape)
-        # print(targets.shape)
-        # print(total_len)
-        prediction = prediction.transpose(0, 1)
+        #print(prediction.shape)
+
+        prediction = prediction.transpose(0, 1) # N * L * vocab_size
+        #print(prediction.shape)
+        #print(target.shape) # target: N * L
 
         output_list = []
         target_list = []
@@ -123,7 +122,7 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
 
         loss /= total_len
         loss.backward()
-
+        nn.utils.clip_grad_value_(model.parameters(), clip_grad)
         optimizer.step()
 
         # release memory
@@ -229,7 +228,7 @@ def train(args: Dict[str, str]):
         epoch += 1
         print("Training for Epoch " + str(epoch) + "\n")
 
-        avg_loss, avg_ppl = train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, device)
+        avg_loss, avg_ppl = train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, clip_grad, device)
         print('epoch %d:  avg. loss %.2f, avg. ppl %.2f, time elapsed %.2f sec' % (epoch, avg_loss, avg_ppl, time.time() - begin_time),
               file=sys.stderr)
 
@@ -284,6 +283,8 @@ def train(args: Dict[str, str]):
                 # You may also need to load the state of the optimizer saved before
                 if saved_optimizer:
                     optimizer = saved_optimizer
+                    for param_group in optimizer.param_groups:
+                        param_group['lr'] *= lr_decay
 
                 # reset patience
                 patience = 0
@@ -299,7 +300,7 @@ def beam_search(model, test_loader, beam_size, max_decoding_time_step, tgtEntry)
         translated_sent = []
         for wid in value:
             translated_sent.append(tgtEntry.id2word(wid))
-        hypotheses.append(Hypothesis(translated_sent, hypotheses.score))
+        hypotheses.append(Hypothesis(translated_sent[1:-1], hypotheses.score))
     return hypotheses
 
 
