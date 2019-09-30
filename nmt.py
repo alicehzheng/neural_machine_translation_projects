@@ -299,8 +299,8 @@ def beam_search(model, test_loader, beam_size, max_decoding_time_step, tgtEntry)
         value = example_hyps.value
         translated_sent = []
         for wid in value:
-            translated_sent.append(tgtEntry.id2word(wid))
-        hypotheses.append(Hypothesis(translated_sent[1:-1], hypotheses.score))
+            translated_sent.append(tgtEntry.index2word(wid))
+        hypotheses.append(Hypothesis(translated_sent[1:-1], example_hyps.score))
     return hypotheses
 
 
