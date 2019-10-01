@@ -76,7 +76,6 @@ def compute_corpus_level_bleu_score(references: List[List[str]], hypotheses: Lis
     """
     if references[0][0] == '<s>':
         references = [ref[1:-1] for ref in references]
-
     bleu_score = corpus_bleu([[ref] for ref in references],
                              [hyp.value for hyp in hypotheses])
 
@@ -91,9 +90,9 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
     running_len = 0
     running_sample = 0
     for batch_idx, (source, target, target_lens) in enumerate(train_loader):
-        print(batch_idx)
-        if batch_idx > 10:
-            break
+        if batch_idx % 100 == 0:
+            print(batch_idx)
+
         optimizer.zero_grad()
 
         source = source.to(device)
@@ -310,7 +309,9 @@ def beam_search(model, test_loader, beam_size, max_decoding_time_step, tgtEntry,
         for wid in value:
             translated_sent.append(tgtEntry.index2word(wid))
         print(translated_sent)
-        hypotheses.append(Hypothesis(translated_sent[1:-1], example_hyps.score))
+        hype = Hypothesis(translated_sent[1:-1], example_hyps.score)
+        hypotheses.append(hype)
+    
     return hypotheses
 
 
@@ -345,13 +346,11 @@ def decode(args: Dict[str, str]):
                              max_decoding_time_step=int(args['--max-decoding-time-step']), tgtEntry=tgtEntry, device=device)
 
     if args['--test-tgt']:
-        top_hypotheses = [hyps[0] for hyps in hypotheses]
-        bleu_score = compute_corpus_level_bleu_score(test_data_tgt, top_hypotheses)
+        bleu_score = compute_corpus_level_bleu_score(test_data_tgt, hypotheses)
         print(f'Corpus BLEU: {bleu_score}', file=sys.stderr)
 
     with open(args['--output-path'], 'w') as f:
-        for src_sent, hyps in zip(test_data_src, hypotheses):
-            top_hyp = hyps[0]
+        for src_sent, top_hyp in zip(test_data_src, hypotheses):
             hyp_sent = ' '.join(top_hyp.value)
             f.write(hyp_sent + '\n')
 

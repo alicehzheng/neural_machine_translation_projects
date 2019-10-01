@@ -29,14 +29,14 @@ python nmt.py \
     --uniform-init 0.1 \
     --dropout 0.2 \
     --clip-grad 5.0 \
-    --max-epoch 1 \
+    --max-epoch 25 \
     --lr-decay 0.5 2>${work_dir}/err.log
 
 python nmt.py \
     decode \
     --cuda \
     --vocab ${vocab} \
-    --beam-size 10 \
+    --beam-size 5 \
     --max-decoding-time-step 100 \
     --model-path ${work_dir}/best_model.pt \
     --test-src ${test_src} \
