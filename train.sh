@@ -3,8 +3,8 @@
 vocab="data/vocab.bin"
 train_src="data/train.de-en.de.wmixerprep"
 train_tgt="data/train.de-en.en.wmixerprep"
-dev_src="data/valid.de-en.de"
-dev_tgt="data/valid.de-en.en"
+dev_src="data/valid.de-en.de.wmixerprep"
+dev_tgt="data/valid.de-en.en.wmixerprep"
 test_src="data/test.de-en.de"
 test_tgt="data/test.de-en.en"
 

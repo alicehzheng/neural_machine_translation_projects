@@ -5,8 +5,7 @@ A very basic implementation of neural machine translation
 
 Usage:
     nmt.py train --train-src=<file> --train-tgt=<file> --dev-src=<file> --dev-tgt=<file> --vocab=<file> [options]
-    nmt.py decode [options] MODEL_PATH TEST_SOURCE_FILE OUTPUT_FILE
-    nmt.py decode [options] MODEL_PATH TEST_SOURCE_FILE TEST_TARGET_FILE OUTPUT_FILE
+    nmt.py decode --test-src=<file> --test-tgt=<file> --output-path=<file> --vocab=<file> [options]
 
 Options:
     -h --help                               show this screen.
@@ -33,6 +32,10 @@ Options:
     --valid-niter=<int>                     perform validation after how many iterations [default: 2000]
     --dropout=<float>                       dropout [default: 0.2]
     --max-decoding-time-step=<int>          maximum number of decoding time steps [default: 70]
+    --test-src=<file>
+    --test-tgt=<file>
+    --output-path=<file>
+    --model-path=<file>
 """
 
 import sys
@@ -89,6 +92,8 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
     running_sample = 0
     for batch_idx, (source, target, target_lens) in enumerate(train_loader):
         print(batch_idx)
+        if batch_idx > 10:
+            break
         optimizer.zero_grad()
 
         source = source.to(device)
@@ -333,7 +338,7 @@ def decode(args: Dict[str, str]):
     print(f"load model from {args['--model-path']}", file=sys.stderr)
 
 
-    model = NMT.load(args['--model-path'])
+    model = torch.load(args['--model-path'])
 
     hypotheses = beam_search(model, test_loader,
                              beam_size=int(args['--beam-size']),
@@ -363,6 +368,7 @@ def main():
         print("train mode")
         train(args)
     elif args['decode']:
+        print("decode mode")
         decode(args)
     else:
         raise RuntimeError(f'invalid mode')
