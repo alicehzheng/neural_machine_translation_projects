@@ -90,9 +90,7 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
     running_len = 0
     running_sample = 0
     for batch_idx, (source, target, target_lens) in enumerate(train_loader):
-        if batch_idx % 100 == 0:
-            print(batch_idx)
-
+        print(batch_idx)
         optimizer.zero_grad()
 
         source = source.to(device)
@@ -101,12 +99,13 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
         target = target.to(device)
 
         prediction = model(source, target, teacher_forcing_ratio) # prediction: L * N * vocab_size
-
-        #print(prediction.shape)
+        print("prediction")
+        print(prediction.shape)
+        print(prediction)
 
         prediction = prediction.transpose(0, 1) # N * L * vocab_size
-        #print(prediction.shape)
-        #print(target.shape) # target: N * L
+        print(prediction.shape)
+        print(target.shape) # target: N * L
 
         output_list = []
         target_list = []
@@ -116,16 +115,30 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
             total_len += t_len
             output_list.append(prediction[i, 0:t_len])
             target_list.append(target[i, 0:t_len])
-
+        print("output_list and target_list")
+        print(output_list)
+        print(target_list)
         outputs = torch.cat(output_list, 0)
         targets = torch.cat(target_list, 0).long()
+        print("outputs")
+        print(outputs)
+        print(outputs.shape)
+        print("targets")
+        print(targets)
+        print(target.shape)
 
         loss = criterion(outputs, targets)
+        print("loss")
+        print(loss)
         running_loss += loss.item()
         running_len += total_len
         running_sample += batch_size
-
+        print(running_loss)
+        print(running_len)
+        print(running_sample)
         loss /= total_len
+        print("loss")
+        print(loss)
         loss.backward()
         nn.utils.clip_grad_value_(model.parameters(), clip_grad)
         optimizer.step()
@@ -191,23 +204,28 @@ def train(args: Dict[str, str]):
     max_patience = int(args['--patience'])
     lr_decay = float(args['--lr-decay'])
 
-    train_data_src = read_corpus(args['--train-src'], source='src')
-    train_data_tgt = read_corpus(args['--train-tgt'], source='tgt')
+    train_data_src = read_corpus(args['--train-src'], source='src')[:4]
+    train_data_tgt = read_corpus(args['--train-tgt'], source='tgt')[:4]
 
     dev_data_src = read_corpus(args['--dev-src'], source='src')
     dev_data_tgt = read_corpus(args['--dev-tgt'], source='tgt')
 
 
 
-
+    print("train_data_src")
+    print(train_data_src)
+    print(srcEntry.words2indices(train_data_src))
+    print("train_data_tgt")
+    print(train_data_tgt)
+    print(tgtEntry.words2indices(train_data_tgt))
     # each sent is represented by indices in the corresponding VocabEntry
     train_data = Trainset(srcEntry.words2indices(train_data_src), tgtEntry.words2indices(train_data_tgt))
     dev_data = Trainset(srcEntry.words2indices(dev_data_src), tgtEntry.words2indices(dev_data_tgt))
-    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=4, collate_fn=collate)
-    dev_loader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=4, collate_fn=collate)
+    train_loader = DataLoader(train_data, batch_size, shuffle=False, num_workers=1, collate_fn=collate)
+    dev_loader = DataLoader(train_data, batch_size, shuffle=False, num_workers=4, collate_fn=collate)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    print(device)
     model = NMT(
         embed_size=int(args['--embed-size']), hidden_size=int(args['--hidden-size']), vocab_size_src=vocab_size_src, vocab_size_tgt=vocab_size_tgt, out_size=int(args['--hidden-size']), device=device, dropout_rate=float(args['--dropout']))
 
@@ -230,7 +248,7 @@ def train(args: Dict[str, str]):
 
     while epoch <= max_epoch:
         epoch += 1
-        print("Training for Epoch " + str(epoch) + "\n")
+        print("Training for Epoch " + str(epoch) + " with TF=" + str(teacher_forcing_ratio) + "\n")
 
         avg_loss, avg_ppl = train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, clip_grad, device)
         print('epoch %d:  avg. loss %.2f, avg. ppl %.2f, time elapsed %.2f sec' % (epoch, avg_loss, avg_ppl, time.time() - begin_time),
@@ -251,6 +269,8 @@ def train(args: Dict[str, str]):
 
         cum_loss = cumulative_examples = cumulative_tgt_words = 0.
         valid_num += 1
+
+        '''
 
         print('begin validation ...', file=sys.stderr)
 
@@ -293,6 +313,7 @@ def train(args: Dict[str, str]):
 
                 # reset patience
                 patience = 0
+        '''
 
 
 

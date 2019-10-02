@@ -41,7 +41,7 @@ class Encoder(nn.Module):
 
     def forward_for_one(self, x):
         embed = self.embedding(x.long())
-        embed = self.embed_drop(embed)
+        #embed = self.embed_drop(embed)
         output, (hidden1, cell1) = self.lstm1(embed)
         key = self.act(self.fc1(output))
         value = self.act(self.fc2(output))
@@ -50,10 +50,16 @@ class Encoder(nn.Module):
         return None, key, value, hidden, cell
 
     def forward(self, x):
+        print("-----encoder forward function-----")
         x, seq_lens = pad_packed_sequence(x, batch_first=True)
-
+        #print("x")
+        #print(x.shape)
+        #print(x)
         embed = self.embedding(x.long())
-        embed = self.embed_drop(embed)
+        #embed = self.embed_drop(embed)
+        #print("embed")
+        #print(embed.shape)
+        #print(embed)
         embed = pack_padded_sequence(embed, seq_lens, batch_first = True)
         output_lstm, (hidden1, cell1) = self.lstm1(embed)  # N x L x H
         #output_lstm, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
@@ -69,15 +75,36 @@ class Encoder(nn.Module):
         #output_lstm = pack_padded_sequence(output_lstm, seq_lens, batch_first=True)
         #output_lstm, (hidden4, cell4) = self.lstm4(output_lstm)  # N x L x H
         output, seq_lens = pad_packed_sequence(output_lstm, batch_first=True)
+        #print("output")
+        #print(output.shape)
+        #print(output)
         #print(seq_lens)
         #print(output.shape) # N * L * 512
         #print(hidden4.shape) # 2 * N * 256
         #print(cell4.shape) # 2 * N * 256
         key = self.act(self.fc1(output))
         value = self.act(self.fc2(output))
+        #print("key")
+        #print(key.shape)
+        #print(key)
+        #print("value")
+        #print(value.shape)
+        #print(value)
 
+        #print("hidden1")
+        #print(hidden1.shape)
+        #print(hidden1)
+        #print("cell1")
+        #print(cell1.shape)
+        #print(cell1)
         hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1) # concatenate hidden states of both directions
+        #print("hidden")
+        #print(hidden.shape)
+        #print(hidden)
         cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
+        #print("cell")
+        #print(cell.shape)
+        #print(cell)
         #print(key.shape) # N * L * out_dim
         #print(value.shape)# N * L * out_dim
         #print(hidden.shape) # N * 512
@@ -92,6 +119,7 @@ class Attention_general(nn.Module):
         self.E_softmax = nn.Softmax(dim=2)
 
     def forward(self, hidden2, key, value, seq_lens):
+        print("-----attention forward function-----")
         # key: seq//8, batch, base*2 --> batch base*2, seq//8
         # hidden2: batch, base*2     --> batch 1 base*2
 
@@ -131,29 +159,49 @@ class Attention(nn.Module):
         self.E_softmax = nn.Softmax(dim=-1)
 
     def forward(self, hidden, key, value, seq_lens):
-
+        print("-----attention forward function-----")
+        #print("hidden")
+        #print(hidden.shape)
+        #print(hidden)
         query = self.query_mlp(hidden)
+        print("query")
+        #print(query.shape)
+        print(query)
 
+        print("key")
         #print(key.shape) # key: N * L * out_dim
+        print(key)
+        #print("value")
         #print(value.shape) # value: N * L * out_dim
+        #print(value)
         #print(query.shape) # query: N * out_dim
 
         attention_score_hidden = torch.tanh(key + query.unsqueeze(1)) # query: N * 1 * out_dim
+        #print(key + query.unsqueeze(1))
+        print("score_hidden")
         #print(attention_score_hidden.shape) # attention_score_hidden: N * L * out_dim
+        print(attention_score_hidden)
         attention_score_weight = self.attention_mlp(attention_score_hidden).squeeze(2)
+        print("score_weight")
         #print(attention_score_weight.shape) # attention_score_weight: N * L
+        print(attention_score_weight)
 
         #print(attention_score_weight)
         #print(seq_lens)
         if seq_lens is not None:
             for i in range(0, len(seq_lens)):
                 attention_score_weight[i, seq_lens[i]:] = float("-infinity")
-        #print(attention_score_weight)
-        attention_score = self.E_softmax(attention_score_weight)
-        #print(attention_score)
+        print(attention_score_weight)
+        #attention_score = self.E_softmax(attention_score_weight)
+        attention_score = F.normalize(attention_score_weight, dim=-1)
+        print("score")
+        #print(attention_score.shape)
+        print(attention_score)
 
         context = torch.bmm(attention_score.unsqueeze(1), value).squeeze(1) # bmm: (N * 1 * L), (N * L * dim) -> (N * 1 * dim)
+        print("context")
         #print(context.shape) # N * dim
+        print(context)
         return context, attention_score
 
 class Decoder(nn.Module):
@@ -165,19 +213,37 @@ class Decoder(nn.Module):
         #self.drop = nn.Dropout(0.05)
         self.fc = nn.Linear(hidden_size, vocab_size)
         #self.fc.weight = self.embed.weight
+        self.E_softmax = nn.Softmax(dim=-1)
 
     def forward(self, x, context, hidden1, cell1):
+        print("----decoder forward function----")
+        print("context")
+        print(context)
+        print("x")
+        print(x)
         x = self.embed(x)
+        print(x)
         #print(x.shape) # N * 256
         #print(context.shape) # N * 256
         x = torch.cat([x, context], dim=1)
+        print(x)
         #print(x.shape) # N * 512
-        hidden1, cell1 = self.lstm1(x, (hidden1, cell1))
+        hidden, cell = self.lstm1(x, (hidden1, cell1))
         #hidden2, cell2 = self.lstm2(hidden1, (hidden2, cell2))
         #x = self.drop(hidden2)
-        x = self.fc(hidden1)
+        print("hidden")
+        print(hidden.shape)
+        print(hidden)
+        print("cell")
+        print(cell.shape)
+        print(cell)
+        x = self.fc(hidden)
+        x = self.E_softmax(x)
+        print("x")
+        print(x.shape)
+        print(x)
         #return x, hidden1, cell1, hidden2, cell2
-        return x, hidden1, cell1
+        return x, hidden, cell
 
 
 class NMT(nn.Module):
@@ -212,23 +278,47 @@ class NMT(nn.Module):
 
         batch_size, max_len = tgt_sents.shape[0:2]
         prediction = torch.zeros(max_len, batch_size, self.vocab_size_tgt).to(self.device)
+        print("prediction")
+        print(prediction.shape)
 
         seq_lens, key, value, hidden, cell = self.encoder(src_sents)
 
-        word = tgt_sents[:, 0]
+        print("return results from encoder")
+        print(seq_lens)
+        print(key)
+        print(value)
+        print(hidden)
+        print(cell)
 
-        for t in range(max_len):
+        word = tgt_sents[:, 0]
+        word_vec_0 = torch.zeros(batch_size, self.vocab_size_tgt).to(self.device)
+        word_vec_0[:, 1] = 1.0
+        print("word_vec_0")
+        print(word_vec_0.shape)
+        print(word_vec_0)
+        prediction[0] = word_vec_0
+
+        for t in range(1, max_len):
+            print("word feed in at step: " + str(t))
+            print(word)
             context, attention = self.attention(hidden, key, value, seq_lens)
+            print("context")
+            print(context)
             # print("word")
             #print(word.shape)
             word_vec, hidden, cell = self.decoder(word.long(), context, hidden, cell)
+            print("word_vec")
             #print(word_vec.shape) # N * vocab_size
+            print(word_vec)
             prediction[t] = word_vec
             teacher_force = torch.rand(1) < teacher_forcing_ratio
             if teacher_force:
                 word = tgt_sents[:, t]
             else:
                 word = word_vec.max(1)[1]
+            print("predicted word at step: " + str(t))
+            print(word_vec.max(1)[1])
+
         return prediction # L * N * vocab_size
 
 
