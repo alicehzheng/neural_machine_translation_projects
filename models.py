@@ -35,28 +35,28 @@ class Encoder(nn.Module):
         #self.dropout2 = nn.Dropout(dropout_rate)
         #self.dropout3 = nn.Dropout(dropout_rate)
 
-        #self.fc1 = nn.Linear(hidden_size * 2, out_size)
-        #self.fc2 = nn.Linear(hidden_size * 2, out_size)
+        self.fc1 = nn.Linear(hidden_size * 2, out_size)
+        self.fc2 = nn.Linear(hidden_size * 2, out_size)
         self.act = nn.SELU(True)
 
     def forward_for_one(self, x):
         embed = self.embedding(x.long())
         #embed = self.embed_drop(embed)
         output, (hidden1, cell1) = self.lstm1(embed)
-        #key = self.act(self.fc1(output))
-        #value = self.act(self.fc2(output))
-        key = output
-        value = output
+        key = self.act(self.fc1(output))
+        value = self.act(self.fc2(output))
+        #key = output
+        #value = output
         hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1)  # concatenate hidden states of both directions
         cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
         return None, key, value, hidden, cell
 
     def forward(self, x):
-        print("-----encoder forward function-----")
+        #print("-----encoder forward function-----")
         x, seq_lens = pad_packed_sequence(x, batch_first=True)
-        print("x")
+        #print("x")
         #print(x.shape)
-        print(x)
+        #print(x)
         embed = self.embedding(x.long())
         #embed = self.embed_drop(embed)
         #print("embed")
@@ -86,10 +86,10 @@ class Encoder(nn.Module):
         #print(cell4.shape) # 2 * N * 256
         #######################key = self.act(self.fc1(output))
         #######################value = self.act(self.fc2(output))
-        #key = self.act(self.fc1(output))
-        #value = self.act(self.fc2(output))
-        key = output
-        value = output
+        key = self.act(self.fc1(output))
+        value = self.act(self.fc2(output))
+        #key = output
+        #value = output
 
         #print("key")
         #print(key.shape)
@@ -104,13 +104,15 @@ class Encoder(nn.Module):
         #print("cell1")
         #print(cell1.shape)
         #print(cell1)
-        hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1) # concatenate hidden states of both directions
-        #print("hidden")
-        #print(hidden.shape)
+        ####################hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1) # concatenate hidden states of both directions
+        hidden = hidden1.sum(dim=0)
+        print("hidden")
+        print(hidden.shape)
         #print(hidden)
-        cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
-        #print("cell")
-        #print(cell.shape)
+        ####################cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
+        cell = cell1.sum(dim=0)
+        print("cell")
+        print(cell.shape)
         #print(cell)
         #print(key.shape) # N * L * out_dim
         #print(value.shape)# N * L * out_dim
@@ -118,45 +120,6 @@ class Encoder(nn.Module):
         #print(cell.shape) # N * 512
         return seq_lens, key, value, hidden, cell
 
-
-class Attention_general(nn.Module):
-    def __init__(self, hidden_dim, out_dim):
-        super(Attention_general, self).__init__()
-        self.query_layer = nn.Linear(hidden_dim, out_dim)
-        self.E_softmax = nn.Softmax(dim=2)
-
-    def forward(self, hidden2, key, value, seq_lens):
-        print("-----attention forward function-----")
-        # key: seq//8, batch, base*2 --> batch base*2, seq//8
-        # hidden2: batch, base*2     --> batch 1 base*2
-
-        # key: seq//8, batch, base*2 --> batch base*2, seq//8
-        # hidden2: batch, base*2     --> batch 1 base*2
-        # batch 1 seq//8
-        # batch seq//8 1
-        # value: seq//8, batch, base*2 --> batch base*2, seq//8
-        # batch base*2, 1
-
-
-        # key: batch * seq * 512
-        # value: batch * seq * 512
-        query = self.query_layer(hidden2)
-
-        batch, slen, dim = key.shape[:]
-
-        query = query.reshape(batch, dim, 1)
-
-        E = torch.bmm(key, query).reshape(batch, 1, slen)  # transpose(1,2)
-
-        for i in range(0, len(seq_lens)):
-            E[i, 0, seq_lens[i]:] = float("-infinity")
-
-        # print(E)
-        E = self.E_softmax(E)
-
-        context = torch.bmm(E, value).reshape(batch, dim)
-
-        return context, E.cpu().squeeze(2).data.numpy()
 
 class Attention(nn.Module):
     def __init__(self, hidden_dim, out_dim):
@@ -168,7 +131,7 @@ class Attention(nn.Module):
         self.E_softmax = nn.Softmax(dim=-1)
 
     def forward(self, hidden, key, value, seq_lens):
-        print("-----attention forward function-----")
+        #print("-----attention forward function-----")
         #print("hidden")
         #print(hidden.shape)
         #print(hidden)
@@ -227,7 +190,7 @@ class Decoder(nn.Module):
         #self.E_softmax = nn.Softmax(dim=-1)
 
     def forward(self, word, context, hidden1, cell1):
-        print("----decoder forward function----")
+        #print("----decoder forward function----")
         #print("context")
         #print(context)
         #print("word")
@@ -248,7 +211,7 @@ class Decoder(nn.Module):
         #print(hidden)
         #print("cell")
         #print(cell.shape)
-        print(cell)
+        #print(cell)
         ##x = self.drop(hidden)
         x = self.act(self.fc(hidden))
         #x = F.softmax(x, dim=1)
@@ -263,8 +226,8 @@ class NMT(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size_src, vocab_size_tgt, out_size, device, dropout_rate=0.2):
         super(NMT, self).__init__()
         self.encoder = Encoder(vocab_size_src, embed_size, hidden_size, out_size, dropout_rate)
-        self.decoder = Decoder(vocab_size_tgt, embed_size, hidden_size * 2)
-        self.attention = Attention(hidden_size * 2, hidden_size * 2)
+        self.decoder = Decoder(vocab_size_tgt, embed_size, hidden_size)
+        self.attention = Attention(hidden_size, hidden_size )
         # Uniform Initialization
         self.encoder.apply(init_uniform)
         self.decoder.apply(init_uniform)
@@ -291,42 +254,41 @@ class NMT(nn.Module):
 
         batch_size, max_len = tgt_sents.shape[0:2]
         prediction = torch.zeros(max_len, batch_size, self.vocab_size_tgt).to(self.device)
-        print("prediction")
-        print(prediction.shape)
+        #print("prediction")
+        #print(prediction.shape)
 
         seq_lens, key, value, hidden, cell = self.encoder(src_sents)
 
-        print("return results from encoder")
-        print(seq_lens)
-        print(key)
-        print(value)
-        print(hidden)
-        print(cell)
+        #print("return results from encoder")
+        #print(seq_lens)
+        #print(key)
+        #print(value)
+        #print(hidden)
+        #print(cell)
 
         word = tgt_sents[:, 0]
         word_vec_0 = torch.zeros(batch_size, self.vocab_size_tgt).to(self.device)
         word_vec_0[:, 1] = 1.0
         print("word_vec_0")
-        print(word_vec_0.shape)
+        #print(word_vec_0.shape)
         print(word_vec_0)
         prediction[0] = word_vec_0
 
         for t in range(1, max_len):
             print("word feed in at step: " + str(t))
             print(word)
-            print(word.shape)
+            #print(word.shape)
             context, attention = self.attention(hidden, key, value, seq_lens)
-            print("return results form attention")
+            #print("return results form attention")
             #print("context")
-            print(context)
+            #print(context)
             # print("word")
             #print(word.shape)
-
             word_vec, hidden, cell = self.decoder(word.long(), context, hidden, cell)
-            print("return results from decoder")
-            print("word_vec")
+            #print("return results from decoder")
+            #print("word_vec")
             #print(word_vec.shape) # N * vocab_size
-            print(word_vec)
+            #print(word_vec)
             prediction[t] = word_vec
             teacher_force = torch.rand(1) < teacher_forcing_ratio
             if teacher_force:

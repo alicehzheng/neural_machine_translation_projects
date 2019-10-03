@@ -100,7 +100,6 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
 
         prediction = model(source, target, teacher_forcing_ratio) # prediction: L * N * vocab_size
         print("prediction")
-        print(prediction.shape)
         print(prediction)
 
         prediction = prediction.transpose(0, 1) # N * L * vocab_size
@@ -111,10 +110,10 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
         target_list = []
         total_len = 0
         for i in range(0, batch_size):
-            t_len = target_lens[i]
+            t_len = target_lens[i] - 1  # omitting leading <s> 
             total_len += t_len
-            output_list.append(prediction[i, 0:t_len])
-            target_list.append(target[i, 0:t_len])
+            output_list.append(prediction[i, 1:t_len + 1])
+            target_list.append(target[i, 1:t_len + 1])
         print("output_list and target_list")
         print(output_list)
         print(target_list)
@@ -136,8 +135,8 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
         print(running_loss)
         print(running_len)
         print(running_sample)
-        #loss /= total_len   ###################VER 1
-        loss /= batch_size
+        loss /= total_len   ###################VER 1
+        #loss /= batch_size
         print("loss")
         print(loss)
         loss.backward()
@@ -205,8 +204,8 @@ def train(args: Dict[str, str]):
     max_patience = int(args['--patience'])
     lr_decay = float(args['--lr-decay'])
 
-    train_data_src = read_corpus(args['--train-src'], source='src')[:1]
-    train_data_tgt = read_corpus(args['--train-tgt'], source='tgt')[:1]
+    train_data_src = read_corpus(args['--train-src'], source='src')[:4]
+    train_data_tgt = read_corpus(args['--train-tgt'], source='tgt')[:4]
 
     dev_data_src = read_corpus(args['--dev-src'], source='src')
     dev_data_tgt = read_corpus(args['--dev-tgt'], source='tgt')
@@ -321,9 +320,6 @@ def train(args: Dict[str, str]):
                 # reset patience
                 patience = 0
         '''
-    model_save_path = model_save_dir + '/best_model.pt'
-    print('save currently the best model to [%s]' % model_save_path, file=sys.stderr)
-    torch.save(model, model_save_path)
 
 
 

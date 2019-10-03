@@ -24,10 +24,10 @@ def collate(seqs):
         # print(seqs[x_idx][0].shape)
         data[i, 0:seq_lengths[i]] = torch.LongTensor(seqs[x_idx][0])
         #print(data[i])
-    print("data")
-    print(data)
-    print("seq_lengths")
-    print(seq_lengths)
+    #print("data")
+    #print(data)
+    #print("seq_lengths")
+    #print(seq_lengths)
     packed_data = pack_padded_sequence(data, seq_lengths.numpy(), batch_first=True)
 
     lens = torch.zeros(batch_size, dtype=torch.int)
@@ -47,10 +47,10 @@ def collate(seqs):
         #target[i, 0:target_lens[i]] = torch.LongTensor(seqs[t_idx][1][1:])
         target[i, 0:target_lens[i]] = torch.LongTensor(seqs[t_idx][1][:])
         #print(target[i])
-    print("target")
-    print(target)
-    print("target_lens")
-    print(target_lens)
+    #print("target")
+    #print(target)
+    #print("target_lens")
+    #print(target_lens)
     return [packed_data, target, target_lens]
 
 
