@@ -136,7 +136,8 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
         print(running_loss)
         print(running_len)
         print(running_sample)
-        loss /= total_len
+        #loss /= total_len   ###################VER 1
+        loss /= batch_size
         print("loss")
         print(loss)
         loss.backward()
@@ -204,8 +205,8 @@ def train(args: Dict[str, str]):
     max_patience = int(args['--patience'])
     lr_decay = float(args['--lr-decay'])
 
-    train_data_src = read_corpus(args['--train-src'], source='src')[:4]
-    train_data_tgt = read_corpus(args['--train-tgt'], source='tgt')[:4]
+    train_data_src = read_corpus(args['--train-src'], source='src')[:1]
+    train_data_tgt = read_corpus(args['--train-tgt'], source='tgt')[:1]
 
     dev_data_src = read_corpus(args['--dev-src'], source='src')
     dev_data_tgt = read_corpus(args['--dev-tgt'], source='tgt')
@@ -239,7 +240,9 @@ def train(args: Dict[str, str]):
 
     criterion = nn.CrossEntropyLoss(reduction='sum',ignore_index=0)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
 
     teacher_forcing_ratio = 1
 
@@ -257,7 +260,8 @@ def train(args: Dict[str, str]):
         #torch.save(model, model_save_dir + "/model_" + str(epoch) + ".pt")
 
         # decrease teacher_forcing_ration after certain epochs
-        teacher_forcing_ratio = teacher_forcing_ratio - 0.05 if epoch > 10 else teacher_forcing_ratio
+        teacher_forcing_ratio = teacher_forcing_ratio - 0.05 if epoch > 20 else teacher_forcing_ratio
+        teacher_forcing_ratio = max(teacher_forcing_ratio, 0.5)
 
         # the following code performs validation on dev set, and controls the learning schedule
         # if the dev score is better than the last check point, then the current model is saved.
@@ -269,6 +273,7 @@ def train(args: Dict[str, str]):
 
         cum_loss = cumulative_examples = cumulative_tgt_words = 0.
         valid_num += 1
+
 
         '''
 
@@ -310,11 +315,15 @@ def train(args: Dict[str, str]):
                     optimizer = saved_optimizer
                     for param_group in optimizer.param_groups:
                         param_group['lr'] *= lr_decay
+                        print("learning rate")
+                        print(param_group['lr'])
 
                 # reset patience
                 patience = 0
         '''
-
+    model_save_path = model_save_dir + '/best_model.pt'
+    print('save currently the best model to [%s]' % model_save_path, file=sys.stderr)
+    torch.save(model, model_save_path)
 
 
 
