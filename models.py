@@ -47,8 +47,10 @@ class Encoder(nn.Module):
         value = self.act(self.fc2(output))
         #key = output
         #value = output
-        hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1)  # concatenate hidden states of both directions
-        cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
+        #hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1)  # concatenate hidden states of both directions
+        hidden = hidden1.sum(dim=0)
+        #cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
+        cell = cell1.sum(dim=0)
         return None, key, value, hidden, cell
 
     def forward(self, x):
@@ -106,13 +108,13 @@ class Encoder(nn.Module):
         #print(cell1)
         ####################hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1) # concatenate hidden states of both directions
         hidden = hidden1.sum(dim=0)
-        print("hidden")
-        print(hidden.shape)
+        #print("hidden")
+        #print(hidden.shape)
         #print(hidden)
         ####################cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
         cell = cell1.sum(dim=0)
-        print("cell")
-        print(cell.shape)
+        #print("cell")
+        #print(cell.shape)
         #print(cell)
         #print(key.shape) # N * L * out_dim
         #print(value.shape)# N * L * out_dim
