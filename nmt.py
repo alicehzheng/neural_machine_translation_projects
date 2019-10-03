@@ -5,8 +5,7 @@ A very basic implementation of neural machine translation
 
 Usage:
     nmt.py train --train-src=<file> --train-tgt=<file> --dev-src=<file> --dev-tgt=<file> --vocab=<file> [options]
-    nmt.py decode [options] MODEL_PATH TEST_SOURCE_FILE OUTPUT_FILE
-    nmt.py decode [options] MODEL_PATH TEST_SOURCE_FILE TEST_TARGET_FILE OUTPUT_FILE
+    nmt.py decode --test-src=<file> --test-tgt=<file> --output-path=<file> --vocab=<file> [options]
 
 Options:
     -h --help                               show this screen.
@@ -33,6 +32,10 @@ Options:
     --valid-niter=<int>                     perform validation after how many iterations [default: 2000]
     --dropout=<float>                       dropout [default: 0.2]
     --max-decoding-time-step=<int>          maximum number of decoding time steps [default: 70]
+    --test-src=<file>
+    --test-tgt=<file>
+    --output-path=<file>
+    --model-path=<file>
 """
 
 import sys
@@ -73,7 +76,6 @@ def compute_corpus_level_bleu_score(references: List[List[str]], hypotheses: Lis
     """
     if references[0][0] == '<s>':
         references = [ref[1:-1] for ref in references]
-
     bleu_score = corpus_bleu([[ref] for ref in references],
                              [hyp.value for hyp in hypotheses])
 
@@ -88,6 +90,7 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
     running_len = 0
     running_sample = 0
     for batch_idx, (source, target, target_lens) in enumerate(train_loader):
+        print(batch_idx)
         optimizer.zero_grad()
 
         source = source.to(device)
@@ -96,8 +99,8 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
         target = target.to(device)
 
         prediction = model(source, target, teacher_forcing_ratio) # prediction: L * N * vocab_size
-
-        #print(prediction.shape)
+        #print("prediction")
+        #print(prediction)
 
         prediction = prediction.transpose(0, 1) # N * L * vocab_size
         #print(prediction.shape)
@@ -107,20 +110,35 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
         target_list = []
         total_len = 0
         for i in range(0, batch_size):
-            t_len = target_lens[i]
+            t_len = target_lens[i] - 1  # omitting leading <s>
             total_len += t_len
-            output_list.append(prediction[i, 0:t_len])
-            target_list.append(target[i, 0:t_len])
-
+            output_list.append(prediction[i, 1:t_len + 1])
+            target_list.append(target[i, 1:t_len + 1])
+        #print("output_list and target_list")
+        #print(output_list)
+        #print(target_list)
         outputs = torch.cat(output_list, 0)
         targets = torch.cat(target_list, 0).long()
+        #print("outputs")
+        #print(outputs)
+        #print(outputs.shape)
+        #print("targets")
+        #print(targets)
+        #print(target.shape)
 
         loss = criterion(outputs, targets)
+        #print("loss")
+        #print(loss)
         running_loss += loss.item()
         running_len += total_len
         running_sample += batch_size
-
-        loss /= total_len
+        #print(running_loss)
+        #print(running_len)
+        #print(running_sample)
+        loss /= total_len   ###################VER 1
+        #loss /= batch_size
+        #print("loss")
+        #print(loss)
         loss.backward()
         nn.utils.clip_grad_value_(model.parameters(), clip_grad)
         optimizer.step()
@@ -135,6 +153,7 @@ def evaluate(model, dev_loader, criterion, device):
 
     with torch.no_grad():
         model.eval()
+        model.to(device)
 
         running_loss = 0
         running_len = 0
@@ -176,7 +195,6 @@ def train(args: Dict[str, str]):
     tgtEntry = vocab.tgt # VocabEntry for tgt
     vocab_size_src = len(srcEntry)
     vocab_size_tgt = len(tgtEntry)
-
     batch_size = int(args['--batch-size'])
     clip_grad = float(args['--clip-grad'])
     valid_niter = int(args['--valid-niter'])
@@ -194,16 +212,15 @@ def train(args: Dict[str, str]):
 
 
 
+
     # each sent is represented by indices in the corresponding VocabEntry
     train_data = Trainset(srcEntry.words2indices(train_data_src), tgtEntry.words2indices(train_data_tgt))
     dev_data = Trainset(srcEntry.words2indices(dev_data_src), tgtEntry.words2indices(dev_data_tgt))
-
-    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=4, collate_fn=collate)
+    train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=1, collate_fn=collate)
     dev_loader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=4, collate_fn=collate)
 
-
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    print(device)
     model = NMT(
         embed_size=int(args['--embed-size']), hidden_size=int(args['--hidden-size']), vocab_size_src=vocab_size_src, vocab_size_tgt=vocab_size_tgt, out_size=int(args['--hidden-size']), device=device, dropout_rate=float(args['--dropout']))
 
@@ -215,9 +232,11 @@ def train(args: Dict[str, str]):
 
 
 
-    criterion = nn.CrossEntropyLoss(reduction='sum')
+    criterion = nn.CrossEntropyLoss(reduction='sum',ignore_index=0)
 
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+
 
     teacher_forcing_ratio = 1
 
@@ -226,7 +245,7 @@ def train(args: Dict[str, str]):
 
     while epoch <= max_epoch:
         epoch += 1
-        print("Training for Epoch " + str(epoch) + "\n")
+        print("Training for Epoch " + str(epoch) + " with TF=" + str(teacher_forcing_ratio) + "\n")
 
         avg_loss, avg_ppl = train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio, clip_grad, device)
         print('epoch %d:  avg. loss %.2f, avg. ppl %.2f, time elapsed %.2f sec' % (epoch, avg_loss, avg_ppl, time.time() - begin_time),
@@ -235,7 +254,8 @@ def train(args: Dict[str, str]):
         #torch.save(model, model_save_dir + "/model_" + str(epoch) + ".pt")
 
         # decrease teacher_forcing_ration after certain epochs
-        teacher_forcing_ratio = teacher_forcing_ratio - 0.05 if epoch > 10 else teacher_forcing_ratio
+        teacher_forcing_ratio = teacher_forcing_ratio - 0.05 if epoch > 15 else teacher_forcing_ratio
+        teacher_forcing_ratio = max(teacher_forcing_ratio, 0.5)
 
         # the following code performs validation on dev set, and controls the learning schedule
         # if the dev score is better than the last check point, then the current model is saved.
@@ -248,6 +268,9 @@ def train(args: Dict[str, str]):
         cum_loss = cumulative_examples = cumulative_tgt_words = 0.
         valid_num += 1
 
+
+
+
         print('begin validation ...', file=sys.stderr)
 
         # compute dev. ppl and bleu
@@ -259,9 +282,10 @@ def train(args: Dict[str, str]):
         is_better = len(hist_valid_scores) == 0 or dev_ppl < min(hist_valid_scores)
         hist_valid_scores.append(dev_ppl)
 
+        torch.save(model, model_save_dir + '/model_' + str(epoch) + '.pt')
         if is_better:
             patience = 0
-            model_save_path = model_save_dir + '/model_' + str(epoch) + '.pt'
+            model_save_path = model_save_dir + '/best_model.pt'
             print('save currently the best model to [%s]' % model_save_path, file=sys.stderr)
             torch.save(model, model_save_path)
             # You may also save the optimizer's state
@@ -285,6 +309,8 @@ def train(args: Dict[str, str]):
                     optimizer = saved_optimizer
                     for param_group in optimizer.param_groups:
                         param_group['lr'] *= lr_decay
+                        print("learning rate")
+                        print(param_group['lr'])
 
                 # reset patience
                 patience = 0
@@ -292,15 +318,21 @@ def train(args: Dict[str, str]):
 
 
 
-def beam_search(model, test_loader, beam_size, max_decoding_time_step, tgtEntry):
+def beam_search(model, test_loader, beam_size, max_decoding_time_step, tgtEntry, device):
     hypotheses = []
+    model.eval()
+    model.to(device)
     for batch_idx, (src_sent) in enumerate(test_loader):
-        example_hyps = model.beam_search(src_sent, beam_size=beam_size, max_decoding_time_step=max_decoding_time_step)
+        src_sent = src_sent.to(device)
+        example_hyps = model.beam_search(src_sent, beam_size=beam_size, max_length=max_decoding_time_step)
         value = example_hyps.value
         translated_sent = []
         for wid in value:
-            translated_sent.append(tgtEntry.id2word(wid))
-        hypotheses.append(Hypothesis(translated_sent[1:-1], hypotheses.score))
+            translated_sent.append(tgtEntry.index2word(wid))
+        print(translated_sent)
+        hype = Hypothesis(translated_sent[1:-1], example_hyps.score)
+        hypotheses.append(hype)
+    
     return hypotheses
 
 
@@ -315,31 +347,31 @@ def decode(args: Dict[str, str]):
     srcEntry = vocab.src  # VocabEntry for src
     tgtEntry = vocab.tgt  # VocabEntry for tgt
 
-    test_data_src = read_corpus(args['TEST_SOURCE_FILE'], source='src')
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    test_data_src = read_corpus(args['--test-src'], source='src')
 
     test_data = Testset(srcEntry.words2indices(test_data_src))
     test_loader = DataLoader(test_data, 1, shuffle=False)
 
-    if args['TEST_TARGET_FILE']:
-        test_data_tgt = read_corpus(args['TEST_TARGET_FILE'], source='tgt')
+    if args['--test-tgt']:
+        test_data_tgt = read_corpus(args['--test-tgt'], source='tgt')
 
-    print(f"load model from {args['MODEL_PATH']}", file=sys.stderr)
+    print(f"load model from {args['--model-path']}", file=sys.stderr)
 
 
-    model = NMT.load(args['MODEL_PATH'])
+    model = torch.load(args['--model-path'])
 
     hypotheses = beam_search(model, test_loader,
                              beam_size=int(args['--beam-size']),
-                             max_decoding_time_step=int(args['--max-decoding-time-step']), tgtEntry=tgtEntry)
+                             max_decoding_time_step=int(args['--max-decoding-time-step']), tgtEntry=tgtEntry, device=device)
 
-    if args['TEST_TARGET_FILE']:
-        top_hypotheses = [hyps[0] for hyps in hypotheses]
-        bleu_score = compute_corpus_level_bleu_score(test_data_tgt, top_hypotheses)
+    if args['--test-tgt']:
+        bleu_score = compute_corpus_level_bleu_score(test_data_tgt, hypotheses)
         print(f'Corpus BLEU: {bleu_score}', file=sys.stderr)
 
-    with open(args['OUTPUT_FILE'], 'w') as f:
-        for src_sent, hyps in zip(test_data_src, hypotheses):
-            top_hyp = hyps[0]
+    with open(args['--output-path'], 'w') as f:
+        for src_sent, top_hyp in zip(test_data_src, hypotheses):
             hyp_sent = ' '.join(top_hyp.value)
             f.write(hyp_sent + '\n')
 
@@ -356,6 +388,7 @@ def main():
         print("train mode")
         train(args)
     elif args['decode']:
+        print("decode mode")
         decode(args)
     else:
         raise RuntimeError(f'invalid mode')
