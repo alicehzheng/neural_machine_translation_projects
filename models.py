@@ -106,12 +106,12 @@ class Encoder(nn.Module):
         #print("cell1")
         #print(cell1.shape)
         #print(cell1)
-        ####################hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1) # concatenate hidden states of both directions
+        #hidden = torch.cat([hidden1[0, :, :], hidden1[1, :, :]], dim=1) # concatenate hidden states of both directions
         hidden = hidden1.sum(dim=0)
         #print("hidden")
         #print(hidden.shape)
         #print(hidden)
-        ####################cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
+        #cell = torch.cat([cell1[0, :, :], cell1[1, :, :]], dim=1)
         cell = cell1.sum(dim=0)
         #print("cell")
         #print(cell.shape)
@@ -124,6 +124,37 @@ class Encoder(nn.Module):
 
 
 class Attention(nn.Module):
+    def __init__(self, hidden_dim, out_dim):
+        super(Attention, self).__init__()
+        self.query_layer = nn.Linear(hidden_dim, out_dim)
+        self.E_softmax = nn.Softmax(dim=2)
+
+    def forward(self, hidden, key, value, seq_lens):
+
+
+
+        # key: batch * seq * 512
+        # value: batch * seq * 512
+        query = self.query_layer(hidden)
+
+        batch, slen, dim = key.shape[:]
+
+        query = query.reshape(batch, dim, 1)
+
+        E = torch.bmm(key, query).reshape(batch, 1, slen)  # transpose(1,2)
+
+        if seq_lens is not None:
+            for i in range(0, len(seq_lens)):
+                E[i, 0, seq_lens[i]:] = float("-infinity")
+
+        # print(E)
+        E = self.E_softmax(E)
+
+        context = torch.bmm(E, value).reshape(batch, dim)
+
+        return context, E.cpu().squeeze(2).data.numpy()
+
+class Attention_ver1(nn.Module):
     def __init__(self, hidden_dim, out_dim):
         super(Attention, self).__init__()
         self.query_mlp = nn.Linear(hidden_dim, out_dim)
@@ -202,10 +233,10 @@ class Decoder(nn.Module):
         #print(x)
         #print(x.shape) # N * 256
         #print(context.shape) # N * 256
-        x = torch.cat([x, context], dim=1)
+        input = torch.cat([x, context], dim=1)
         #print(x)
         #print(x.shape) # N * 512
-        hidden, cell = self.lstm1(x, (hidden1, cell1))
+        hidden, cell = self.lstm1(input, (hidden1, cell1))
         #hidden2, cell2 = self.lstm2(hidden1, (hidden2, cell2))
 
         #print("hidden")
@@ -215,21 +246,23 @@ class Decoder(nn.Module):
         #print(cell.shape)
         #print(cell)
         ##x = self.drop(hidden)
-        x = self.act(self.fc(hidden))
+        #x = self.act(self.fc(hidden))
+        output = self.act(self.fc(hidden))
+        #output = F.softmax(output, dim=-1)
         #x = F.softmax(x, dim=1)
         #print("x")
         #print(x.shape)
         #print(x)
         #return x, hidden1, cell1, hidden2, cell2
-        return x, hidden, cell
+        return output, hidden, cell
 
 
 class NMT(nn.Module):
     def __init__(self, embed_size, hidden_size, vocab_size_src, vocab_size_tgt, out_size, device, dropout_rate=0.2):
         super(NMT, self).__init__()
         self.encoder = Encoder(vocab_size_src, embed_size, hidden_size, out_size, dropout_rate)
-        self.decoder = Decoder(vocab_size_tgt, embed_size, hidden_size)
-        self.attention = Attention(hidden_size, hidden_size )
+        self.decoder = Decoder(vocab_size_tgt, embed_size, hidden_size )
+        self.attention = Attention(hidden_size , hidden_size  )
         # Uniform Initialization
         self.encoder.apply(init_uniform)
         self.decoder.apply(init_uniform)
@@ -319,7 +352,7 @@ class NMT(nn.Module):
                 value: List[str]: the decoded target sentence, represented as a list of words
                 score: float: the log-likelihood of the target sentence
         """
-
+        max_length = min(max_length, src_sents.shape[1] + 5)
 
         print("beam search with beam size and length " + str(beam_size) + " " + str(max_length))
 
@@ -329,7 +362,8 @@ class NMT(nn.Module):
 
         context_map = {}
         for idx in range(1, max_length):
-            # print("-------" + str(idx) + "--------")
+            print("-------" + str(idx) + "--------")
+
             if idx > 10  and sequences[0][0][-1] == 2: #end of sentence </s>
                 break
             if idx == 1:
@@ -346,7 +380,7 @@ class NMT(nn.Module):
                 # print(sequences)
                 ordered = sorted(sequences, key=lambda tup: tup[1], reverse=True)
                 sequences = ordered[:min(beam_size, len(ordered))]
-                # print(ordered)
+                print(ordered[0])
             else:
                 new_seqs = []
                 for seq, prob, hidden, cell in sequences:
@@ -375,7 +409,7 @@ class NMT(nn.Module):
                 # print(new_seqs)
                 ordered = sorted(new_seqs, key=lambda tup: tup[1], reverse=True)
                 sequences = ordered[:min(beam_size, len(ordered))]
-                # print(ordered)
+                print(ordered[0])
                 # print(sequences)
         # candidates_list += sequences
         ordered = sorted(sequences, key=lambda tup: tup[1], reverse=True)

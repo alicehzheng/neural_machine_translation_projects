@@ -23,14 +23,14 @@ python nmt.py \
     --dev-tgt ${dev_tgt} \
     --save-to ${work_dir} \
     --valid-niter 2400 \
-    --batch-size 64 \
-    --hidden-size 512 \
-    --embed-size 512 \
+    --batch-size  64 \
+    --hidden-size 216 \
+    --embed-size 216 \
     --uniform-init 0.1 \
     --dropout 0.2 \
     --clip-grad 5.0 \
-    --max-epoch 25 \
-    --lr-decay 0.5
+    --max-epoch 30 \
+    --lr-decay 0.5  
 
 python nmt.py \
     decode \
@@ -39,8 +39,8 @@ python nmt.py \
     --beam-size 5 \
     --max-decoding-time-step 100 \
     --model-path ${work_dir}/best_model.pt \
-    --test-src ${train_src} \
-    --test-tgt ${train_tgt} \
+    --test-src ${test_src} \
+    --test-tgt ${test_tgt} \
     --output-path ${work_dir}/decode.txt
 
-perl multi-bleu.perl ${train_tgt} < ${work_dir}/decode.txt
+perl multi-bleu.perl ${test_tgt} < ${work_dir}/decode.txt

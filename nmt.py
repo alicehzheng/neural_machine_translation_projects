@@ -90,7 +90,8 @@ def train_epoch(model, train_loader, criterion, optimizer, teacher_forcing_ratio
     running_len = 0
     running_sample = 0
     for batch_idx, (source, target, target_lens) in enumerate(train_loader):
-        print(batch_idx)
+        if batch_idx % 100 == 0:
+            print(batch_idx)
         optimizer.zero_grad()
 
         source = source.to(device)
@@ -211,13 +212,14 @@ def train(args: Dict[str, str]):
     dev_data_tgt = read_corpus(args['--dev-tgt'], source='tgt')
 
 
-
+    #print(srcEntry.words2indices(train_data_src))
+    #print(tgtEntry.words2indices(train_data_tgt))
 
     # each sent is represented by indices in the corresponding VocabEntry
     train_data = Trainset(srcEntry.words2indices(train_data_src), tgtEntry.words2indices(train_data_tgt))
     dev_data = Trainset(srcEntry.words2indices(dev_data_src), tgtEntry.words2indices(dev_data_tgt))
     train_loader = DataLoader(train_data, batch_size, shuffle=True, num_workers=1, collate_fn=collate)
-    dev_loader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=4, collate_fn=collate)
+    dev_loader = DataLoader(dev_data, batch_size, shuffle=False, num_workers=1, collate_fn=collate)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(device)
@@ -234,8 +236,8 @@ def train(args: Dict[str, str]):
 
     criterion = nn.CrossEntropyLoss(reduction='sum',ignore_index=0)
 
-    #optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.01)
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001, weight_decay=0.001)
+    #optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
 
     teacher_forcing_ratio = 1
@@ -264,7 +266,7 @@ def train(args: Dict[str, str]):
         # saved best model (and the state of the optimizer), halve the learning rate and continue
         # training. This repeats for up to `--max-num-trial` times.
 
-
+    
         cum_loss = cumulative_examples = cumulative_tgt_words = 0.
         valid_num += 1
 
@@ -314,7 +316,7 @@ def train(args: Dict[str, str]):
 
                 # reset patience
                 patience = 0
-
+         
 
 
 
@@ -348,7 +350,7 @@ def decode(args: Dict[str, str]):
     tgtEntry = vocab.tgt  # VocabEntry for tgt
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+    print(device)
     test_data_src = read_corpus(args['--test-src'], source='src')
 
     test_data = Testset(srcEntry.words2indices(test_data_src))
